@@ -10,13 +10,17 @@
 # MET_ENV=test): o mkdir/cd/PYTHONPATH é a função rsm_setup (rsm_common.sh).
 #
 # todas as variáveis têm o prefixo RSM_ (exceto GI_LOG_MAX_SIZE, lida pelo
-# met_common.sh).  As marcadas com ${X:-padrão} aceitam override pelo ambiente
+# cls_common.sh).  As marcadas com ${X:-padrão} aceitam override pelo ambiente
 # (é assim que o 21.mvol/tst_env aponta o monrad para o ambiente de teste).
 #
 # a única fonte de dados do monrad é o catalog.db do 21.mvol: não há servidor
 # remoto nem acesso aos .mvol.
 #
 
+# 2026.nov  mlabru  - met_common.sh -> cls_common.sh (o arquivo saiu de
+#                     04.dvl/bash para o repo cls.common); o source do
+#                     arquivo antigo, inexistente, derrubava o rsm_run.sh
+#
 # 2026.out  mlabru  - RSM_VENV (padrão ~/.venv, o mesmo do 25.oflow e do
 #                     27.nowcast): o numpy/matplotlib do ~/.local quebrava
 #                     o rsmPNG.py (matplotlib compilado p/ NumPy 1.x)
@@ -35,7 +39,7 @@
 #
 # 2026.ago  mlabru  initial version (Linux/Bash)
 #
-# depends on: bash, met_common.sh
+# depends on: bash, cls_common.sh
 # shellcheck shell=bash
 
 # < configuração >---------------------------------------------------------------------
@@ -78,14 +82,14 @@ RSM_WINDOW_HOURS=24
 # (rsm_activate_venv, em rsm_common.sh)
 RSM_VENV="${RSM_VENV:-${HOME:-/home/$(id -un)}/.venv}"
 
-# limite de tamanho de cada log antes da rotação (10MB; lido pelo met_common.sh)
+# limite de tamanho de cada log antes da rotação (10MB; lido pelo cls_common.sh)
 GI_LOG_MAX_SIZE=$((10 * 1024 * 1024))
 
 # < trava do ambiente de teste >-------------------------------------------------------
 
-# met_check_test_env (met_common.sh, symlink para 04.dvl/bash, comum aos
-# projetos met)
-source "${RSM_LIB_DIR}/met_common.sh"
+# met_check_test_env (cls_common.sh, symlink para o repo cls.common, comum
+# aos projetos met)
+source "${RSM_LIB_DIR}/cls_common.sh"
 
 # com MET_ENV=test, nada pode apontar para fora de MET_TST_ROOT
 met_check_test_env "${RSM_PATH}" "${RSM_DBASE_FILE}" || exit 1

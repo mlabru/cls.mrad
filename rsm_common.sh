@@ -10,7 +10,7 @@
 #
 # pré-requisito: rsm_cfg.sh já importado (ele define RSM_LOG_APP,
 # RSM_LOG_ERR, RSM_PATH, RSM_LIB_DIR e GI_LOG_MAX_SIZE e importa o
-# met_common.sh, de onde vêm met_log e check_log_size).
+# cls_common.sh, de onde vêm met_log e check_log_size).
 #
 # 2026.out  mlabru  - rsm_activate_venv: python3 do RSM_VENV (~/.venv, o
 #                     mesmo do 25.oflow e do 27.nowcast)
