@@ -6,6 +6,7 @@ Copyright (c) 1995-2026, Instituto de Controle do Espaço Aéreo
 test_rsm_dbase
 testes unitários de rsm_dbase (leitura SOMENTE LEITURA do catalog.db)
 
+2026.nov  mlabru  fetch_observations filtra por timestamp (nome do arquivo)
 2026.out  mlabru  banco como única fonte: fetch_last_update; os testes de
                   build_station_status foram para test_rsmStatus.py
 2026.out  mlabru  work.rsm_* e build_station_status (refatoração)
@@ -56,19 +57,27 @@ def test_connect_nao_escreve(make_dbase):
 
 # < fetch_observations >───────────────────────────────────────────────────────────────
 
-def test_fetch_observations_filters_by_window(make_dbase):
+def test_fetch_observations_filters_by_file_time_window(make_dbase):
     """
-    fetch_observations só devolve linhas com mtime dentro de [start, end]
+    fetch_observations filtra pelo horário do NOME do arquivo (coluna
+    timestamp), na janela [início, fim) -- não pelo mtime da chegada
     """
-    lpth = make_dbase([("A/250/before.mvol", 100.0),
-                       ("A/250/inside.mvol", 500.0),
-                       ("A/250/after.mvol", 900.0)])
+    # mtime "trocado" de propósito: se o filtro fosse pelo mtime, o resultado mudaria
+    lpth = make_dbase([("A/250/STI-250--2026-04-12--11-59-59.mvol", 5e9),     # antes
+                       ("A/250/STI-250--2026-04-12--12-00-00.mvol", 1.0),     # início: entra
+                       ("A/250/STI-250--2026-04-12--12-30-00.mvol", 2.0),     # dentro
+                       ("A/250/STI-250--2026-04-12--13-00-00.mvol", 3.0),     # fim: fora
+                       ("A/250/nome-fora-do-padrao.mvol", 4.0)])              # timestamp NULL
+
+    ldt_start = datetime.datetime(2026, 4, 12, 12, 0, tzinfo=datetime.timezone.utc)
+    ldt_end = datetime.datetime(2026, 4, 12, 13, 0, tzinfo=datetime.timezone.utc)
 
     lconn = rsm_dbase.connect(str(lpth))
-    llst = rsm_dbase.fetch_observations(lconn, 200.0, 800.0)
+    llst = rsm_dbase.fetch_observations(lconn, ldt_start.timestamp(), ldt_end.timestamp())
     lconn.close()
 
-    assert llst == [("A/250/inside.mvol", 500.0)]
+    assert sorted(llst) == [("A/250/STI-250--2026-04-12--12-00-00.mvol", 1.0),
+                            ("A/250/STI-250--2026-04-12--12-30-00.mvol", 2.0)]
 
 
 def test_fetch_observations_sem_tabela(tmp_path):

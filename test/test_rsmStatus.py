@@ -6,6 +6,8 @@ Copyright (c) 1995-2026, Instituto de Controle do Espaço Aéreo
 test_rsmStatus
 testes unitários de rsmStatus
 
+2026.nov  mlabru  robustez: chegada mais cedo em slot duplicado; aviso de
+                  estação fora da lista; janela do banco pelo timestamp
 2026.nov  mlabru  atraso medido do horário do arquivo; chegada antes dele = OK
 2026.nov  mlabru  UTC com fuso (sem CDT_OFFSET_UTC): independe do fuso da
                   máquina; generated_at/last_slot; JSON gravado atômico
@@ -347,6 +349,104 @@ def test_build_station_status_missing_dbase_raises(tmp_path):
         rs.build_station_status(str(lpth), 6)
 
     assert not lpth.exists()
+
+def test_keep_earliest_arrival_is_independent_of_row_order():
+    """
+    dois arquivos no mesmo slot: fica o que chegou mais cedo, qualquer que
+    seja a ordem das linhas (antes valia o último lido)
+    """
+    ldt_file = CDT_BASE + datetime.timedelta(minutes=3)
+    lt_early = (ldt_file, ldt_file + datetime.timedelta(minutes=2))
+    lt_late = (CDT_BASE + datetime.timedelta(minutes=7), ldt_file + datetime.timedelta(minutes=30))
+    lt_key = ("Cangucu-250", CDT_BASE)
+
+    for llst_order in ([lt_early, lt_late], [lt_late, lt_early]):
+        ldct_observations = {}
+        for lt_times in llst_order:
+            rs._keep_earliest_arrival(ldct_observations, lt_key, lt_times)
+
+        assert ldct_observations == {lt_key: lt_early}
+
+
+def test_build_station_status_duplicate_slot_uses_earliest_arrival(make_dbase):
+    """
+    no banco, um arquivo no prazo e outro muito atrasado no mesmo slot: o
+    slot sai OK (o primeiro a chegar atendeu o slot)
+    """
+    li_window_hours = 6
+    ls_station = cfg.CLST_STATIONS[0]
+    ldt_slot = _first_slot_of_window(li_window_hours)
+    ls_path_ok, lf_mtime_ok = _row_on_time(ls_station, ldt_slot)
+
+    # segundo arquivo do mesmo slot (5 min depois no nome), chegando 30 min atrasado
+    ldt_late_file = ldt_slot + datetime.timedelta(minutes=5)
+    ls_path_late, _ = _row_on_time(ls_station, ldt_late_file)
+    lf_mtime_late = (ldt_late_file + datetime.timedelta(minutes=30)).timestamp()
+
+    for llst_rows in ([(ls_path_ok, lf_mtime_ok), (ls_path_late, lf_mtime_late)],
+                      [(ls_path_late, lf_mtime_late), (ls_path_ok, lf_mtime_ok)]):
+        lpth = make_dbase(llst_rows)
+        llst_status = [s for _, s in rs.build_station_status(str(lpth), li_window_hours)
+                                       ["stations"][ls_station]]
+
+        assert llst_status.count(cfg.CI_ST_OK) == 1
+        assert cfg.CI_ST_DL not in llst_status
+        lpth.unlink()
+
+
+def test_build_station_status_selects_by_file_time_not_arrival(make_dbase):
+    """
+    a janela do banco é pelo horário do arquivo: um arquivo da janela que
+    chegou muito tarde (mtime fora da janela) entra como atraso grave, e um
+    arquivo antigo que só chegou agora (horário fora da janela) não entra
+    """
+    li_window_hours = 6
+    ls_station = cfg.CLST_STATIONS[0]
+    ldt_slot = _first_slot_of_window(li_window_hours)
+
+    ls_path_in, _ = _row_on_time(ls_station, ldt_slot)
+    lf_mtime_very_late = (ldt_slot + datetime.timedelta(hours=li_window_hours + 1)).timestamp()
+
+    ldt_old_file = ldt_slot - datetime.timedelta(hours=1)
+    ls_path_old, _ = _row_on_time(ls_station, ldt_old_file)
+    lf_mtime_now = datetime.datetime.now(datetime.timezone.utc).timestamp()
+
+    lpth = make_dbase([(ls_path_in, lf_mtime_very_late), (ls_path_old, lf_mtime_now)])
+    llst_status = [s for _, s in rs.build_station_status(str(lpth), li_window_hours)
+                                   ["stations"][ls_station]]
+
+    assert llst_status[0] == cfg.CI_ST_DL
+    assert llst_status.count(cfg.CI_ST_DL) == 1
+    assert cfg.CI_ST_OK not in llst_status
+
+
+def test_unknown_station_is_logged_as_warning(make_dbase, caplog):
+    """
+    estação fora de CLST_STATIONS aparece no painel e vai para o log como
+    aviso (estação nova ou caminho fora do padrão no banco)
+    """
+    li_window_hours = 6
+    lpth = make_dbase([_row_on_time("PastaErrada-250", _first_slot_of_window(li_window_hours))])
+
+    with caplog.at_level("WARNING", logger=rs.M_LOG.name):
+        rs.build_station_status(str(lpth), li_window_hours)
+
+    llst_warnings = [l_rec.getMessage() for l_rec in caplog.records
+                     if l_rec.levelname == "WARNING"]
+    assert any("PastaErrada-250" in ls_msg and "1 slots" in ls_msg for ls_msg in llst_warnings)
+
+
+def test_known_stations_produce_no_warning(make_dbase, caplog):
+    """
+    só estações da lista: nenhum aviso de estação desconhecida
+    """
+    li_window_hours = 6
+    lpth = make_dbase([_row_on_time(cfg.CLST_STATIONS[0], _first_slot_of_window(li_window_hours))])
+
+    with caplog.at_level("WARNING", logger=rs.M_LOG.name):
+        rs.build_station_status(str(lpth), li_window_hours)
+
+    assert not [l_rec for l_rec in caplog.records if "CLST_STATIONS" in l_rec.getMessage()]
 
 # < main >─────────────────────────────────────────────────────────────────────────────
 

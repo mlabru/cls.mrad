@@ -281,15 +281,15 @@ def _list_stations(fdct_observations: dict) -> list:
     :returns: lista de estações
     """
     lset_known = set(cfg.CLST_STATIONS)
-    lcnt_new = collections.Counter(ls_station for ls_station, _ in fdct_observations
+    ldct_new_slot_counts = collections.Counter(ls_station for ls_station, _ in fdct_observations
                                    if ls_station not in lset_known)
 
-    for ls_station, li_slot_count in sorted(lcnt_new.items()):
+    for ls_station, li_slot_count in sorted(ldct_new_slot_counts.items()):
         M_LOG.warning("estação fora de CLST_STATIONS: %s (%d slots na janela) -- "
                       "estação nova ou caminho fora do padrão no catalog.db?",
                       ls_station, li_slot_count)
 
-    return list(cfg.CLST_STATIONS) + sorted(lcnt_new)
+    return list(cfg.CLST_STATIONS) + sorted(ldct_new_slot_counts)
 
 # ─────────────────────────────────────────────────────────────────────────────────────
 def _window_slots(fdt_start_utc: datetime.datetime,
