@@ -13,6 +13,9 @@ não cria o banco, não cria tabela, não grava e não apaga nada.  A
 interpretação de cada linha (sítio, alcance, slot esperado, offset UTC) é
 feita por quem lê (rsmStatus._parse_observation).
 
+2026.nov  mlabru  fetch_observations filtra pela coluna timestamp (horário
+                  do nome do arquivo; índice próprio no mvol), janela
+                  semiaberta [início, fim)
 2026.out  mlabru  guia de manutenção: docstring de fetch_observations citava
                   o find do rsm_run.sh, que não existe mais
 2026.out  mlabru  fetch_last_update (max(created_at)): o banco é a única fonte
@@ -66,19 +69,25 @@ def connect(fs_dbase_path: str) -> sqlite3.Connection:
 def fetch_observations(fconn: sqlite3.Connection, ff_start_epoch: float,
                        ff_end_epoch: float) -> list[tuple[str, float]]:
     """
-    lê as observações brutas com mtime dentro da janela [início, fim].
+    lê as observações brutas cujo horário de arquivo está na janela [início, fim).
 
-    o mtime é o epoch bruto do servidor (sem conversão de fuso), como o
-    "find -printf %T@" do vol_sync.sh (21.mvol) o listou.  A conversão para
-    UTC fica com quem lê (rsmStatus._parse_observation).
+    filtra pela coluna timestamp: o epoch UTC que o 21.mvol extrai do NOME do
+    arquivo (o mesmo horário que o monrad usa para escolher a coluna e medir
+    o atraso; o mvol tem índice nela).  Linhas sem timestamp (nome que o mvol
+    não conseguiu ler) ficam de fora -- o monrad também não as leria.
+
+    devolve o mtime (epoch da chegada no servidor, como o "find -printf %T@"
+    do vol_sync.sh o listou) e o caminho; a interpretação fica com quem lê
+    (rsmStatus._parse_observation).
 
     :param fconn: conexão aberta por connect()
-    :param ff_start_epoch: início da janela (epoch, inclusive)
-    :param ff_end_epoch: fim da janela (epoch, inclusive)
-    :returns: lista de (fullpath, mtime); lista vazia se a tabela ainda não
-              existe (o 21.mvol a cria na primeira sincronização)
+    :param ff_start_epoch: início da janela (epoch UTC, inclusive)
+    :param ff_end_epoch: fim da janela (epoch UTC, exclusive)
+    :returns: lista de (fullpath, mtime); lista vazia se a tabela (ou a
+              coluna timestamp) ainda não existe -- o 21.mvol as cria
     """
-    ls_query = f"SELECT fullpath, mtime FROM {ct.CS_TABLE} WHERE mtime >= ? AND mtime <= ?"
+    ls_query = (f"SELECT fullpath, mtime FROM {ct.CS_TABLE} "
+                "WHERE timestamp >= ? AND timestamp < ?")
 
     try:
         return fconn.execute(ls_query, (ff_start_epoch, ff_end_epoch)).fetchall()
