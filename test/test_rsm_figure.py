@@ -6,6 +6,7 @@ Copyright (c) 1995-2026, Instituto de Controle do Espaço Aéreo
 test_rsm_figure
 testes unitários de rsm_figure
 
+2026.nov  mlabru  reference_time/generated_time; eixo e título em UTC
 2026.out  mlabru  _station_percentages (e o total "nunca zero")
 2026.out  mlabru  stations_from_document, source_alert, build_figure com aviso
 2026.out  mlabru  work.rsm_figure; testes de cap_window e _rate_color
@@ -256,6 +257,50 @@ def test_build_figure_draws_alert_text():
                                  "⚠  fonte parada")
 
     assert "⚠  fonte parada" in [l_text.get_text() for l_text in l_fig.texts]
+
+    l_fig.clear()
+
+
+def test_reference_time_comes_from_last_slot_not_from_the_clock():
+    """
+    a última coluna do grid é o last_slot do JSON (UTC); sem ele (JSON
+    antigo), o instante atual
+    """
+    ldct_document = {"last_slot": "2026-11-14T12:50:00+00:00"}
+
+    assert fig_mod.reference_time(ldct_document, CDT_NOW_UTC) == \
+           datetime.datetime(2026, 11, 14, 12, 50, tzinfo=datetime.timezone.utc)
+    assert fig_mod.reference_time({"A-250": []}, CDT_NOW_UTC) == CDT_NOW_UTC
+
+
+def test_generated_time_is_none_for_old_format():
+    """
+    generated_at vira datetime; JSON antigo não tem: None
+    """
+    assert fig_mod.generated_time({"generated_at": "2026-11-14T12:59:30+00:00"}) == \
+           datetime.datetime(2026, 11, 14, 12, 59, 30, tzinfo=datetime.timezone.utc)
+    assert fig_mod.generated_time({"A-250": []}) is None
+
+
+def test_build_figure_labels_axis_and_title_in_utc():
+    """
+    o último rótulo do eixo é a hora cheia do ref; o título diz UTC e mostra
+    quando o JSON foi gerado
+    """
+    ldct_data = _make_data([cfg.CI_ST_OK] * 12)
+    ldt_ref = datetime.datetime(2026, 11, 14, 12, 50, tzinfo=datetime.timezone.utc)
+    ldt_generated = datetime.datetime(2026, 11, 14, 12, 59, tzinfo=datetime.timezone.utc)
+
+    l_fig = fig_mod.build_figure(ldct_data, ldt_ref, 12, 2, None, ldt_generated)
+    lax_grid = l_fig.axes[0]
+
+    # 12 colunas, rótulo a cada 6: colunas 0 (11:00) e 6 (12:00)
+    llst_labels = [l_label.get_text() for l_label in lax_grid.get_xticklabels()]
+    assert llst_labels == ["11:00", "12:00"]
+
+    ls_title = lax_grid.get_title(loc="left")
+    assert "ref: 2026-11-14 12:50 UTC" in ls_title
+    assert "gerado: 2026-11-14 12:59 UTC" in ls_title
 
     l_fig.clear()
 

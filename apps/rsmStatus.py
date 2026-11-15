@@ -15,9 +15,20 @@ uso:
     python rsmStatus.py -d catalog.db [-w HORAS] [-s SAIDA.json]
 
 saída:
-    { "source_last_update": "<ISO UTC>" | null,
+    { "generated_at": "<ISO UTC>",          (quando este JSON foi gerado)
+      "last_slot": "<ISO UTC>",             (início do slot da última coluna)
+      "source_last_update": "<ISO UTC>" | null,
       "stations": { "Belem-250": [[timestamp, código_status], ...], ... } }
 
+tudo é UTC, com fuso explícito: o mtime do banco é um epoch (não tem fuso) e
+o horário no nome do arquivo é UTC.  Não depende do fuso da máquina.
+
+2026.nov  mlabru  UTC com fuso de ponta a ponta: sai o CDT_OFFSET_UTC (+3h
+                  fixo, só correto num host em GMT-3); o mtime é epoch e vira
+                  UTC direto.  Os timestamps do JSON saem corretos (antes
+                  eram datetimes UTC "ingênuos" convertidos como hora local:
+                  3h a mais).  JSON ganha generated_at e last_slot, para o
+                  PNG rotular o eixo pelo próprio JSON; gravação atômica
 2026.out  mlabru  guia de manutenção: sem o apelido CI_STEP (usa
                   cfg.CI_SLOT_MINUTES); janela padrão vem do rsm_config;
                   tipos em _parse_observation
@@ -46,15 +57,13 @@ import time
 # locals
 import work.rsm_config as cfg
 import work.rsm_dbase as dba
+import work.rsm_files as fil
 
 # < constants >────────────────────────────────────────────────────────────────────────
 
-# diferença para converter hora local (GMT-3, sem horário de verão) em UTC.
-# ATENÇÃO: offset fixo -- só é correto numa máquina configurada em GMT-3
-CDT_OFFSET_UTC = datetime.timedelta(hours=3)
-
-# folga, em horas, somada à janela na consulta ao catalog.db (evita cortar
-# slots na borda por causa do offset local/UTC)
+# folga, em horas, somada à janela na consulta ao catalog.db: a consulta é pela
+# chegada (mtime) e o slot vem do nome do arquivo; a folga cobre relógio de
+# radar adiantado em relação ao servidor sem cortar slots na borda
 CI_DBASE_QUERY_MARGIN_HOURS = 6
 
 # < logging >──────────────────────────────────────────────────────────────────────────
@@ -99,7 +108,7 @@ def classify_slot(fdct_observations: dict, fs_station: str,
 
     :param fdct_observations: {(estação, horário_esperado): horário_chegada}, UTC
     :param fs_station: estação, no formato "{sítio}-{alcance}"
-    :param fdt_slot: horário esperado do slot (UTC, múltiplo de 10 min)
+    :param fdt_slot: horário esperado do slot (UTC com fuso, múltiplo de 10 min)
     :returns: (timestamp, código_status); o timestamp é o da chegada, ou o do
               próprio slot se o arquivo não foi recebido
     """
@@ -146,20 +155,20 @@ def _parse_observation(fs_mtime: str | float,
     gravado pelo 21.mvol é interpretado; nenhum arquivo é acessado.
 
     fluxo:
-    1. converte o mtime (epoch, hora local do servidor) para UTC (+3h);
+    1. converte o mtime (epoch: instante absoluto, sem fuso) para UTC;
     2. extrai sítio e alcance das duas pastas acima do arquivo;
-    3. extrai do nome do arquivo o horário esperado
-       (STI-250--2026-04-12--00-03-23.mvol -> 2026-04-12 00:03:23);
+    3. extrai do nome do arquivo o horário esperado, em UTC
+       (STI-250--2026-04-12--00-03-23.mvol -> 2026-04-12 00:03:23 UTC);
     4. arredonda o horário esperado para o início do slot de 10 min.
 
-    :param fs_mtime: horário de modificação no servidor (epoch; str ou float)
+    :param fs_mtime: horário de chegada no servidor (epoch; str ou float)
     :param fs_filepath: caminho "{sítio}/{alcance}/{nome}.mvol"
     :returns: ((estação, horário_esperado), horário_chegada_utc), ou None se a
               observação estiver malformada (o motivo vai para o log)
     """
     try:
-        ldt_arrival_local = datetime.datetime.fromtimestamp(float(fs_mtime))
-        ldt_arrival_utc = ldt_arrival_local + CDT_OFFSET_UTC
+        ldt_arrival_utc = datetime.datetime.fromtimestamp(float(fs_mtime),
+                                                          tz=datetime.timezone.utc)
 
         lpth_file = pathlib.PurePosixPath(fs_filepath)
         ls_site = lpth_file.parent.parent.name
@@ -170,7 +179,7 @@ def _parse_observation(fs_mtime: str | float,
         llst_date_and_time = lpth_file.stem.split("--")[1:3]
         ldt_expected = datetime.datetime.strptime(
                           f"{llst_date_and_time[0]} {llst_date_and_time[1]}",
-                          "%Y-%m-%d %H-%M-%S")
+                          "%Y-%m-%d %H-%M-%S").replace(tzinfo=datetime.timezone.utc)
 
     except (ValueError, IndexError) as l_err:
         M_LOG.warning("observação ignorada (%s): mtime=%s path=%s",
@@ -180,29 +189,29 @@ def _parse_observation(fs_mtime: str | float,
     return (ls_station, _round_down_to_slot(ldt_expected)), ldt_arrival_utc
 
 # ─────────────────────────────────────────────────────────────────────────────────────
-def _load_dbase(fs_dbase_path: str, fdt_now_local: datetime.datetime,
+def _load_dbase(fs_dbase_path: str, fdt_now_utc: datetime.datetime,
                 fi_window_hours: int) -> tuple[dict, datetime.datetime | None]:
     """
     lê do catalog.db (somente leitura) as observações da janela e o instante
     da observação mais nova.
 
-    a consulta é feita pelo mtime bruto, que está em hora LOCAL -- por isso
-    os limites usam fdt_now_local, sem o offset UTC.
+    a consulta é feita pelo mtime, um epoch: os limites são os epochs da
+    janela (timestamp() de um datetime com fuso).
 
     :param fs_dbase_path: caminho do catalog.db
-    :param fdt_now_local: instante atual, hora local
+    :param fdt_now_utc: instante atual, UTC com fuso
     :param fi_window_hours: janela pedida, em horas
     :returns: ({(estação, horário_esperado): horário_chegada}, última_atualização)
     :raises sqlite3.OperationalError: banco inexistente ou ilegível
     """
-    ldt_query_start = fdt_now_local - datetime.timedelta(
+    ldt_query_start = fdt_now_utc - datetime.timedelta(
                                          hours=fi_window_hours + CI_DBASE_QUERY_MARGIN_HOURS)
 
     l_conn = dba.connect(fs_dbase_path)
 
     try:
         llst_rows = dba.fetch_observations(l_conn, ldt_query_start.timestamp(),
-                                           fdt_now_local.timestamp())
+                                           fdt_now_utc.timestamp())
         ldt_last_update = dba.fetch_last_update(l_conn)
     finally:
         l_conn.close()
@@ -237,45 +246,63 @@ def _list_stations(fdct_observations: dict) -> list:
     return list(cfg.CLST_STATIONS) + llst_new
 
 # ─────────────────────────────────────────────────────────────────────────────────────
-def _station_slots(fdct_observations: dict, fs_station: str,
-                   fdt_start_utc: datetime.datetime,
-                   fdt_end_utc: datetime.datetime) -> list:
+def _window_slots(fdt_start_utc: datetime.datetime,
+                  fdt_end_utc: datetime.datetime) -> list:
     """
-    classifica todos os slots de 10 min de uma estação dentro da janela.
+    lista os slots de 10 min da janela [início, fim), um por coluna do painel.
 
-    carência: um slot sem observação e mais novo que (fim - 20 min) sai como
-    FUTURE ("Aguardando"), não MISS -- o arquivo pode já ter chegado ao
-    servidor sem que o 21.mvol (sync a cada 10 min) o tenha gravado no banco.
+    anda de 10 em 10 min a partir do início e arredonda cada passo para o
+    início do seu slot.  A janela tem horas inteiras, então são sempre
+    horas x 6 slots.
 
-    :param fdct_observations: {(estação, horário_esperado): horário_chegada}
-    :param fs_station: estação
     :param fdt_start_utc: início da janela (inclusive)
     :param fdt_end_utc: fim da janela (exclusive)
-    :returns: lista de (timestamp, código_status), do slot mais antigo ao mais novo
+    :returns: lista de inícios de slot (UTC), do mais antigo ao mais novo
     """
-    ldt_pending_start = fdt_end_utc - datetime.timedelta(minutes=cfg.CI_PENDING_GRACE_MINUTES)
-
     llst_slots = []
-    li_received_count = 0
     ldt_current = fdt_start_utc
 
     while ldt_current < fdt_end_utc:
-        ldt_slot = _round_down_to_slot(ldt_current)
+        llst_slots.append(_round_down_to_slot(ldt_current))
+        ldt_current += datetime.timedelta(minutes=cfg.CI_SLOT_MINUTES)
+
+    return llst_slots
+
+# ─────────────────────────────────────────────────────────────────────────────────────
+def _station_slots(fdct_observations: dict, fs_station: str,
+                   flst_slots: list, fdt_pending_start: datetime.datetime) -> list:
+    """
+    classifica todos os slots de 10 min de uma estação dentro da janela.
+
+    carência: um slot sem observação que começou a partir de fdt_pending_start
+    (fim da janela - 20 min) sai como FUTURE ("Aguardando"), não MISS -- o
+    arquivo pode já ter chegado ao servidor sem que o 21.mvol (sync a cada
+    10 min) o tenha gravado no banco.
+
+    :param fdct_observations: {(estação, horário_esperado): horário_chegada}
+    :param fs_station: estação
+    :param flst_slots: inícios de slot da janela (ver _window_slots)
+    :param fdt_pending_start: início do período de carência
+    :returns: lista de (timestamp, código_status), do slot mais antigo ao mais novo
+    """
+    llst_statuses = []
+    li_received_count = 0
+
+    for ldt_slot in flst_slots:
         lf_timestamp, li_status = classify_slot(fdct_observations, fs_station, ldt_slot)
 
-        if li_status == cfg.CI_ST_MISS and ldt_slot >= ldt_pending_start:
+        if li_status == cfg.CI_ST_MISS and ldt_slot >= fdt_pending_start:
             li_status = cfg.CI_ST_FUTURE
 
         if li_status in (cfg.CI_ST_OK, cfg.CI_ST_DS, cfg.CI_ST_DL):
             li_received_count += 1
 
-        llst_slots.append((lf_timestamp, li_status))
-        ldt_current += datetime.timedelta(minutes=cfg.CI_SLOT_MINUTES)
+        llst_statuses.append((lf_timestamp, li_status))
 
     M_LOG.info("%d/%d registros válidos encontrados para %s.",
-               li_received_count, len(llst_slots), fs_station)
+               li_received_count, len(llst_statuses), fs_station)
 
-    return llst_slots
+    return llst_statuses
 
 # ─────────────────────────────────────────────────────────────────────────────────────
 def build_station_status(fs_dbase_path: str,
@@ -286,35 +313,48 @@ def build_station_status(fs_dbase_path: str,
     fluxo:
     1. lê do catalog.db as observações da janela e a última atualização;
     2. decide a lista de estações (conhecidas + novas vistas no banco);
-    3. calcula a janela [agora - horas, agora) em UTC;
+    3. calcula a janela [agora - horas, agora) em UTC e os seus slots;
     4. classifica cada slot de cada estação.
 
     :param fs_dbase_path: catalog.db do 21.mvol (só lido, nunca alterado)
     :param fi_window_hours: janela, em horas
-    :returns: {"source_last_update": ISO UTC ou None,
+    :returns: {"generated_at": ISO UTC,
+               "last_slot": ISO UTC (início do slot da última coluna) ou None,
+               "source_last_update": ISO UTC ou None,
                "stations": {estação: [(timestamp, código_status), ...]}}
     :raises sqlite3.OperationalError: banco inexistente ou ilegível
     """
-    # um único "agora" (hora local) para toda a rodada
-    ldt_now_local = datetime.datetime.now()
+    # um único "agora" para toda a rodada
+    ldt_now_utc = datetime.datetime.now(datetime.timezone.utc)
 
-    ldct_observations, ldt_last_update = _load_dbase(fs_dbase_path, ldt_now_local,
+    ldct_observations, ldt_last_update = _load_dbase(fs_dbase_path, ldt_now_utc,
                                                      fi_window_hours)
 
-    # a janela termina no minuto atual (segundos descartados), já em UTC
-    ldt_end_utc = ldt_now_local.replace(second=0, microsecond=0) + CDT_OFFSET_UTC
+    # a janela termina no minuto atual (segundos descartados)
+    ldt_end_utc = ldt_now_utc.replace(second=0, microsecond=0)
     ldt_start_utc = ldt_end_utc - datetime.timedelta(hours=fi_window_hours)
+
+    llst_slots = _window_slots(ldt_start_utc, ldt_end_utc)
+    ldt_pending_start = ldt_end_utc - datetime.timedelta(minutes=cfg.CI_PENDING_GRACE_MINUTES)
 
     ldct_stations = {}
     for ls_station in _list_stations(ldct_observations):
         ldct_stations[ls_station] = _station_slots(ldct_observations, ls_station,
-                                                   ldt_start_utc, ldt_end_utc)
+                                                   llst_slots, ldt_pending_start)
 
     ls_last_update = None
     if ldt_last_update is not None:
         ls_last_update = ldt_last_update.isoformat()
 
-    return {"source_last_update": ls_last_update, "stations": ldct_stations}
+    # janela de 0 h não tem slot nenhum
+    ls_last_slot = None
+    if llst_slots:
+        ls_last_slot = llst_slots[-1].isoformat()
+
+    return {"generated_at": ldt_now_utc.isoformat(),
+            "last_slot": ls_last_slot,
+            "source_last_update": ls_last_update,
+            "stations": ldct_stations}
 
 # ─────────────────────────────────────────────────────────────────────────────────────
 def main(flst_argv: list | None = None) -> int:
@@ -334,8 +374,10 @@ def main(flst_argv: list | None = None) -> int:
         M_LOG.error("catalog.db indisponível (%s): %s", l_args.dbase, l_err)
         return 1
 
-    with open(l_args.out, "w", encoding="utf-8") as l_file:
-        json.dump(ldct_status, l_file)
+    # atômico: quem ler o JSON nunca pega um arquivo pela metade
+    with fil.atomic_output(l_args.out) as lpth_tmp:
+        with open(lpth_tmp, "w", encoding="utf-8") as l_file:
+            json.dump(ldct_status, l_file)
 
     return 0
 

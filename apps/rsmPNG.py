@@ -10,6 +10,9 @@ produzido por rsmStatus.py.
 uso:
     python rsmPNG.py [-i STATUS.json] [-o SAIDA.png] [-w HORAS]
 
+2026.nov  mlabru  eixo em UTC pelo próprio JSON (fg.reference_time; antes a
+                  hora local do momento do desenho, 3h atrás das células) e
+                  "gerado em" no título; PNG gravado de forma atômica
 2026.out  mlabru  guia de manutenção: janela padrão vem do rsm_config
 2026.out  mlabru  banco como única fonte: lê o documento novo (stations +
                   source_last_update) e desenha o aviso de fonte parada
@@ -32,6 +35,7 @@ import time
 # locals
 import work.rsm_config as cfg
 import work.rsm_figure as fg
+import work.rsm_files as fil
 
 # < constants >────────────────────────────────────────────────────────────────────────
 
@@ -100,15 +104,20 @@ def main(flst_argv: list | None = None) -> int:
 
     ldct_window, li_total_slots, li_window_hours = fg.cap_window(ldct_status, l_args.win)
 
-    ls_alert = fg.source_alert(ldct_document, datetime.datetime.now(datetime.timezone.utc))
+    ldt_now_utc = datetime.datetime.now(datetime.timezone.utc)
+
+    ls_alert = fg.source_alert(ldct_document, ldt_now_utc)
     if ls_alert is not None:
         M_LOG.warning("%s", ls_alert)
 
-    l_figure = fg.build_figure(ldct_window, datetime.datetime.now(),
-                               li_total_slots, li_window_hours, ls_alert)
+    l_figure = fg.build_figure(ldct_window, fg.reference_time(ldct_document, ldt_now_utc),
+                               li_total_slots, li_window_hours, ls_alert,
+                               fg.generated_time(ldct_document))
 
-    l_figure.savefig(l_args.out, dpi=CI_PNG_DPI, bbox_inches="tight",
-                     facecolor=cfg.CS_BG_DARK, edgecolor="none")
+    # atômico: quem exibe o PNG nunca pega uma imagem pela metade
+    with fil.atomic_output(l_args.out) as lpth_tmp:
+        l_figure.savefig(lpth_tmp, dpi=CI_PNG_DPI, bbox_inches="tight",
+                         facecolor=cfg.CS_BG_DARK, edgecolor="none")
 
     M_LOG.info("PNG salvo em: %s", l_args.out)
 

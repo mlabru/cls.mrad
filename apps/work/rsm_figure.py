@@ -8,9 +8,11 @@ renderizador do monitor de recepção radar, compartilhado por rsmPNG.py (PNG
 estático) e rsmGUI.py (janela PyQt).
 
 entrada: o documento de status gerado por rsmStatus.py
-    { "source_last_update": "<ISO UTC>" | null,
+    { "generated_at": "<ISO UTC>", "last_slot": "<ISO UTC>",
+      "source_last_update": "<ISO UTC>" | null,
       "stations": { "Belem-250": [(timestamp, código_status), ...], ... } }
-    (stations_from_document e source_alert extraem as duas partes)
+    (stations_from_document, reference_time, generated_time e source_alert
+    extraem as partes)
 saída: uma matplotlib Figure com três painéis empilhados:
     1. grade estações x slots (cada célula pintada pela cor do status);
     2. barras empilhadas com o % de cada status por estação;
@@ -18,6 +20,12 @@ saída: uma matplotlib Figure com três painéis empilhados:
 
 não faz I/O nem depende de Qt -- por isso é testável sem display.
 
+2026.nov  mlabru  eixo e título em UTC, pelo próprio JSON: reference_time
+                  (last_slot) e generated_time (generated_at); antes o
+                  rsmPNG passava a hora LOCAL do momento do desenho, e os
+                  rótulos ficavam 3h atrás das células, que são UTC.
+                  build_figure(fdt_generated_at) mostra quando o JSON foi
+                  gerado (um PNG congelado fica visível)
 2026.out  mlabru  guia de manutenção: total "nunca zero" num lugar só
                   (_nonzero_total); percentuais por estação em
                   _station_percentages (eram 4 listas paralelas); geometria
@@ -98,6 +106,56 @@ def stations_from_document(fdct_document: dict) -> dict:
         return fdct_document
 
     return fdct_document["stations"]
+
+# ─────────────────────────────────────────────────────────────────────────────────────
+def _document_time(fdct_document: dict, fs_key: str) -> datetime.datetime | None:
+    """
+    lê um instante ISO UTC do documento de status.
+
+    :param fdct_document: conteúdo do JSON de status
+    :param fs_key: chave do instante ("last_slot", "generated_at")
+    :returns: o instante (com fuso), ou None se a chave falta ou está vazia
+              (JSON de formato antigo)
+    """
+    ls_value = fdct_document.get(fs_key)
+
+    if ls_value is None:
+        return None
+
+    return datetime.datetime.fromisoformat(ls_value)
+
+# ─────────────────────────────────────────────────────────────────────────────────────
+def reference_time(fdct_document: dict,
+                   fdt_now_utc: datetime.datetime) -> datetime.datetime:
+    """
+    devolve o instante da última coluna do grid (rótulos do eixo e título).
+
+    vem do próprio JSON (last_slot), e não do relógio de quem desenha: o
+    eixo descreve exatamente os slots que o rsmStatus.py classificou.  O
+    recorte de cap_window guarda os slots MAIS RECENTES, então a última
+    coluna continua sendo last_slot.
+
+    :param fdct_document: conteúdo do JSON de status
+    :param fdt_now_utc: instante atual, UTC -- só para JSON de formato antigo,
+                        que não traz last_slot
+    :returns: início do slot da última coluna, UTC
+    """
+    ldt_last_slot = _document_time(fdct_document, "last_slot")
+
+    if ldt_last_slot is None:
+        return fdt_now_utc
+
+    return ldt_last_slot
+
+# ─────────────────────────────────────────────────────────────────────────────────────
+def generated_time(fdct_document: dict) -> datetime.datetime | None:
+    """
+    devolve quando o rsmStatus.py gerou o JSON.
+
+    :param fdct_document: conteúdo do JSON de status
+    :returns: instante UTC, ou None (JSON de formato antigo)
+    """
+    return _document_time(fdct_document, "generated_at")
 
 # ─────────────────────────────────────────────────────────────────────────────────────
 def source_alert(fdct_document: dict, fdt_now_utc: datetime.datetime) -> str | None:
@@ -281,7 +339,8 @@ def _hide_spines(fax: Axes) -> None:
 # ─────────────────────────────────────────────────────────────────────────────────────
 def _draw_status_grid(fax: Axes, fdct_data: dict, flst_stations: list,
                       fdt_ref_time: datetime.datetime, fi_total_slots: int,
-                      fi_window_hours: int) -> None:
+                      fi_window_hours: int,
+                      fdt_generated_at: datetime.datetime | None) -> None:
     """
     desenha o painel 1: a grade estações (linhas) x slots (colunas).
 
@@ -294,9 +353,10 @@ def _draw_status_grid(fax: Axes, fdct_data: dict, flst_stations: list,
     :param fax: painel onde desenhar
     :param fdct_data: status por estação
     :param flst_stations: estações, na ordem das linhas
-    :param fdt_ref_time: instante de referência (o slot mais recente)
+    :param fdt_ref_time: instante de referência (o slot mais recente), UTC
     :param fi_total_slots: número de colunas da grade
     :param fi_window_hours: janela em horas (só para o título)
+    :param fdt_generated_at: quando o JSON foi gerado (título), ou None
     """
     li_station_count = len(flst_stations)
 
@@ -344,10 +404,15 @@ def _draw_status_grid(fax: Axes, fdct_data: dict, flst_stations: list,
     _hide_spines(fax)
 
     # 4. título e legenda
+    ls_generated = ""
+    if fdt_generated_at is not None:
+        ls_generated = f"  ·  gerado: {fdt_generated_at.strftime('%Y-%m-%d %H:%M')} UTC"
+
     fax.set_title(f"  Grade de Recepção  ·"
                   f"  últimas {fi_window_hours}h  ·"
                   f"  {fi_total_slots} slots × {li_station_count} estações  ."
-                  f"  ref: {fdt_ref_time.strftime('%Y-%m-%d %H:%M')}",
+                  f"  ref: {fdt_ref_time.strftime('%Y-%m-%d %H:%M')} UTC"
+                  f"{ls_generated}",
                   color=cfg.CS_TEXT_MAIN, fontsize=10, pad=10, loc="left",
                   fontfamily="monospace")
 
@@ -508,7 +573,8 @@ def _draw_metric_cards(fax: Axes, fdct_data: dict) -> None:
 # ─────────────────────────────────────────────────────────────────────────────────────
 def build_figure(fdct_data: dict, fdt_ref_time: datetime.datetime,
                  fi_total_slots: int, fi_window_hours: int,
-                 fs_alert: str | None = None) -> Figure:
+                 fs_alert: str | None = None,
+                 fdt_generated_at: datetime.datetime | None = None) -> Figure:
     """
     monta a figura completa do monitor.
 
@@ -519,10 +585,12 @@ def build_figure(fdct_data: dict, fdt_ref_time: datetime.datetime,
     4. se houver aviso (fonte parada), escreve-o em vermelho no topo.
 
     :param fdct_data: status por estação ({estação: [(timestamp, status), ...]})
-    :param fdt_ref_time: instante de referência (horário do slot mais recente)
+    :param fdt_ref_time: instante de referência (horário do slot mais recente,
+                         UTC; ver reference_time)
     :param fi_total_slots: número de slots (colunas) a desenhar
     :param fi_window_hours: janela em horas (aparece no título)
     :param fs_alert: aviso sobre a fonte de dados (ver source_alert), ou None
+    :param fdt_generated_at: quando o JSON foi gerado (ver generated_time), ou None
     :returns: a Figure pronta (salvar com savefig ou embutir num canvas Qt)
     """
     llst_stations = _station_order(fdct_data)
@@ -539,7 +607,7 @@ def build_figure(fdct_data: dict, fdt_ref_time: datetime.datetime,
     lax_cards = l_figure.add_subplot(l_grid_spec[2])
 
     _draw_status_grid(lax_grid, fdct_data, llst_stations,
-                      fdt_ref_time, fi_total_slots, fi_window_hours)
+                      fdt_ref_time, fi_total_slots, fi_window_hours, fdt_generated_at)
     _draw_station_bars(lax_bars, fdct_data, llst_stations)
     _draw_metric_cards(lax_cards, fdct_data)
 

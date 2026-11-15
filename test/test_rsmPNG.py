@@ -6,6 +6,7 @@ Copyright (c) 1995-2026, Instituto de Controle do Espaço Aéreo
 test_rsmPNG
 testes unitários de rsmPNG
 
+2026.nov  mlabru  last_slot/generated_at; PNG atômico (sem temporário)
 2026.out  mlabru  JSON no formato novo (source_last_update + stations)
 2026.out  mlabru  arg_parse (era args_parse); main retorna 0; JSON vazio
 2026.ago  mlabru  initial version (Linux/Python)
@@ -15,6 +16,7 @@ testes unitários de rsmPNG
 # python library
 import datetime
 import json
+import os
 import sys
 
 # locals
@@ -62,7 +64,10 @@ def test_main_reads_json_and_writes_png(tmp_path, monkeypatch):
                 for ls_station in cfg.CLST_STATIONS}
 
     lpth_in = tmp_path / "in.json"
-    ldct_document = {"source_last_update": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+    ls_now = datetime.datetime.now(datetime.timezone.utc).isoformat()
+    ldct_document = {"generated_at": ls_now,
+                    "last_slot": "2026-11-14T12:50:00+00:00",
+                    "source_last_update": ls_now,
                     "stations": ldct_data}
 
     lpth_in.write_text(json.dumps(ldct_document), encoding="utf-8")
@@ -74,8 +79,9 @@ def test_main_reads_json_and_writes_png(tmp_path, monkeypatch):
 
     assert png.main() == 0
 
-    assert lpth_out.exists()
-    assert lpth_out.stat().st_size > 0
+    assert lpth_out.read_bytes()[:8] == b"\x89PNG\r\n\x1a\n"
+    # gravação atômica: nenhum temporário sobra no diretório
+    assert sorted(ls_name for ls_name in os.listdir(tmp_path)) == ["in.json", "out.png"]
 
 def test_main_returns_error_on_empty_json(tmp_path):
     """
