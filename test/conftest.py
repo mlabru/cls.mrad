@@ -6,6 +6,8 @@ Copyright (c) 1995-2026, Instituto de Controle do Espaço Aéreo
 conftest
 fixtures e configuração compartilhada dos testes
 
+2026.nov  mlabru  sem a fixture qapp e o QT_QPA_PLATFORM (a GUI PyQt foi
+                  removida)
 2026.out  mlabru  fixture make_dbase: catalog.db de teste no formato do 21.mvol
                   (o banco é a única fonte do monrad)
 2026.ago  mlabru  initial version (Linux/Python)
@@ -14,12 +16,7 @@ fixtures e configuração compartilhada dos testes
 
 # python library
 import datetime
-import os
 import sqlite3
-import sys
-
-# roda Qt sem display (CI / headless)
-os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 # matplotlib sem backend interativo
 import matplotlib
@@ -29,19 +26,6 @@ matplotlib.use("Agg")
 import pytest
 
 # < fixtures >─────────────────────────────────────────────────────────────────────────
-
-@pytest.fixture(scope="session")
-def qapp():
-    """
-    QApplication único, compartilhado por toda a sessão de testes
-    """
-    # PyQt
-    from PyQt5 import QtWidgets
-
-    # reaproveita instância existente, se houver
-    l_app = QtWidgets.QApplication.instance() or QtWidgets.QApplication(sys.argv)
-
-    yield l_app
 
 @pytest.fixture
 def make_dbase(tmp_path):

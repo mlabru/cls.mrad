@@ -2,7 +2,7 @@
 # Copyright (c) 1995-2026, Instituto de Controle do Espaço Aéreo
 #
 # rsm_common.sh
-# funções compartilhadas por rsm_run.sh e rsm_gui.sh.
+# funções do rsm_run.sh (separadas para os testes as carregarem sozinhas).
 #
 # este arquivo é feito para ser importado com "source", nunca executado
 # diretamente - por isso não declara seu próprio "set -e": herda as opções
@@ -11,6 +11,8 @@
 # pré-requisito: rsm_cfg.sh já importado (ele define RSM_LOG_APP,
 # RSM_LOG_ERR, RSM_PATH, RSM_LIB_DIR e GI_LOG_MAX_SIZE e importa o
 # cls_common.sh, de onde vêm met_log e check_log_size).
+#
+# 2026.nov  mlabru  - comentários sem o rsm_gui.sh/PyQt5 (removidos)
 #
 # 2026.out  mlabru  - rsm_activate_venv: python3 do RSM_VENV (~/.venv, o
 #                     mesmo do 25.oflow e do 27.nowcast)
@@ -53,7 +55,7 @@ rsm_setup()
 } # rsm_setup
 
 # -------------------------------------------------------------------------------------
-# ativa o virtualenv RSM_VENV (numpy, matplotlib, PyQt5), se existir; senão
+# ativa o virtualenv RSM_VENV (numpy, matplotlib), se existir; senão
 # avisa e segue com o python3 do sistema.  Loga o python3 efetivo -- sob o
 # cron ele pode ser diferente do da sessão interativa.
 #

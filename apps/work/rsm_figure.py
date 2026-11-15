@@ -4,8 +4,8 @@ Centro Logístico de Simulação Meteorológica
 Copyright (c) 1995-2026, Instituto de Controle do Espaço Aéreo
 
 rsm_figure
-renderizador do monitor de recepção radar, compartilhado por rsmPNG.py (PNG
-estático) e rsmGUI.py (janela PyQt).
+renderizador do monitor de recepção radar, usado por rsmPNG.py (PNG
+estático).
 
 entrada: o documento de status gerado por rsmStatus.py
     { "generated_at": "<ISO UTC>", "last_slot": "<ISO UTC>",
@@ -18,8 +18,9 @@ saída: uma matplotlib Figure com três painéis empilhados:
     2. barras empilhadas com o % de cada status por estação;
     3. cards de métricas gerais (total, no prazo, atrasados, perdidos, taxa).
 
-não faz I/O nem depende de Qt -- por isso é testável sem display.
+não faz I/O nem abre janela -- por isso é testável sem display.
 
+2026.nov  mlabru  docstrings sem a GUI PyQt (removida)
 2026.nov  mlabru  eixo e título em UTC, pelo próprio JSON: reference_time
                   (last_slot) e generated_time (generated_at); antes o
                   rsmPNG passava a hora LOCAL do momento do desenho, e os
@@ -96,7 +97,7 @@ def stations_from_document(fdct_document: dict) -> dict:
     extrai o status por estação do documento gravado por rsmStatus.py.
 
     aceita também o formato antigo (o próprio dicionário de estações, sem a
-    chave "stations"), para a GUI não quebrar com um JSON gravado antes da
+    chave "stations"), para o rsmPNG não quebrar com um JSON gravado antes da
     atualização -- o rsm_run.sh o regrava no ciclo seguinte.
 
     :param fdct_document: conteúdo do JSON de status
@@ -196,7 +197,7 @@ def cap_window(fdct_data: dict, fi_window_hours: int) -> tuple[dict, int, int]:
     ajusta a janela pedida ao que realmente existe no JSON de status.
 
     o JSON guarda a janela com que rsmStatus.py rodou; quem desenha pode pedir
-    outra (ex.: o spin box da GUI).  Esta função garante que título e grid
+    outra (rsmPNG.py -w).  Esta função garante que título e grid
     falem da mesma janela.
 
     fluxo:
@@ -591,7 +592,7 @@ def build_figure(fdct_data: dict, fdt_ref_time: datetime.datetime,
     :param fi_window_hours: janela em horas (aparece no título)
     :param fs_alert: aviso sobre a fonte de dados (ver source_alert), ou None
     :param fdt_generated_at: quando o JSON foi gerado (ver generated_time), ou None
-    :returns: a Figure pronta (salvar com savefig ou embutir num canvas Qt)
+    :returns: a Figure pronta (salvar com savefig)
     """
     llst_stations = _station_order(fdct_data)
 

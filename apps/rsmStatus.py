@@ -23,6 +23,13 @@ saída:
 tudo é UTC, com fuso explícito: o mtime do banco é um epoch (não tem fuso) e
 o horário no nome do arquivo é UTC.  Não depende do fuso da máquina.
 
+2026.nov  mlabru  atraso = chegada - horário do NOME do arquivo (antes:
+                  chegada - início do slot, o que somava o minuto do
+                  arquivo dentro do slot e gerava ~99% dos "atrasos leves"
+                  nos dados reais); chegada antes do horário do arquivo
+                  (relógio do radar adiantado) conta como no prazo (antes:
+                  FUTURE, escondido e fora das estatísticas).  Decisão do
+                  usuário, 2026-11-14
 2026.nov  mlabru  UTC com fuso de ponta a ponta: sai o CDT_OFFSET_UTC (+3h
                   fixo, só correto num host em GMT-3); o mtime é epoch e vira
                   UTC direto.  Os timestamps do JSON saem corretos (antes
@@ -99,14 +106,17 @@ def classify_slot(fdct_observations: dict, fs_station: str,
     """
     classifica um único slot de uma estação.
 
-    regras (diferença = chegada real - horário esperado do slot):
+    regras (atraso = chegada no servidor - horário gravado no nome do arquivo;
+    NÃO o início do slot: um arquivo das 12:08 que chega às 12:10 atrasou
+    2 min, não 10):
     - arquivo não recebido        -> MISS
-    - diferença negativa          -> FUTURE (chegou "antes": slot ainda aberto)
-    - até 9 min (inclusive)       -> OK
+    - até 9 min (inclusive)       -> OK, inclusive atraso negativo (o relógio
+                                     do radar está adiantado em relação ao do
+                                     servidor, mas o arquivo chegou)
     - até 20 min (inclusive)      -> DS (atraso pequeno)
     - acima de 20 min             -> DL (atraso grande)
 
-    :param fdct_observations: {(estação, horário_esperado): horário_chegada}, UTC
+    :param fdct_observations: {(estação, slot): (horário_do_arquivo, horário_chegada)}, UTC
     :param fs_station: estação, no formato "{sítio}-{alcance}"
     :param fdt_slot: horário esperado do slot (UTC com fuso, múltiplo de 10 min)
     :returns: (timestamp, código_status); o timestamp é o da chegada, ou o do
@@ -117,12 +127,10 @@ def classify_slot(fdct_observations: dict, fs_station: str,
     if lt_key not in fdct_observations:
         return fdt_slot.timestamp(), cfg.CI_ST_MISS
 
-    ldt_arrival = fdct_observations[lt_key]
-    lf_delay_seconds = (ldt_arrival - fdt_slot).total_seconds()
+    ldt_file_time, ldt_arrival = fdct_observations[lt_key]
+    lf_delay_seconds = (ldt_arrival - ldt_file_time).total_seconds()
 
-    if lf_delay_seconds < 0:
-        li_status = cfg.CI_ST_FUTURE
-    elif lf_delay_seconds <= cfg.CI_ON_TIME_MAX_SECONDS:
+    if lf_delay_seconds <= cfg.CI_ON_TIME_MAX_SECONDS:
         li_status = cfg.CI_ST_OK
     elif lf_delay_seconds <= cfg.CI_SMALL_DELAY_MAX_SECONDS:
         li_status = cfg.CI_ST_DS
@@ -146,8 +154,8 @@ def _round_down_to_slot(fdt_time: datetime.datetime) -> datetime.datetime:
     return fdt_time.replace(minute=li_slot_minute, second=0, microsecond=0)
 
 # ─────────────────────────────────────────────────────────────────────────────────────
-def _parse_observation(fs_mtime: str | float,
-                       fs_filepath: str) -> tuple[tuple[str, datetime.datetime], datetime.datetime] | None:
+def _parse_observation(fs_mtime: str | float, fs_filepath: str) -> \
+        tuple[tuple[str, datetime.datetime], tuple[datetime.datetime, datetime.datetime]] | None:
     """
     interpreta uma observação bruta do banco (mtime, caminho do arquivo).
 
@@ -159,12 +167,14 @@ def _parse_observation(fs_mtime: str | float,
     2. extrai sítio e alcance das duas pastas acima do arquivo;
     3. extrai do nome do arquivo o horário esperado, em UTC
        (STI-250--2026-04-12--00-03-23.mvol -> 2026-04-12 00:03:23 UTC);
-    4. arredonda o horário esperado para o início do slot de 10 min.
+    4. arredonda o horário do arquivo para o início do slot de 10 min (a
+       chave); o horário exato fica junto, para medir o atraso.
 
     :param fs_mtime: horário de chegada no servidor (epoch; str ou float)
     :param fs_filepath: caminho "{sítio}/{alcance}/{nome}.mvol"
-    :returns: ((estação, horário_esperado), horário_chegada_utc), ou None se a
-              observação estiver malformada (o motivo vai para o log)
+    :returns: ((estação, slot), (horário_do_arquivo, horário_chegada)), em UTC,
+              ou None se a observação estiver malformada (o motivo vai
+              para o log)
     """
     try:
         ldt_arrival_utc = datetime.datetime.fromtimestamp(float(fs_mtime),
@@ -177,7 +187,7 @@ def _parse_observation(fs_mtime: str | float,
 
         # "STI-250--2026-04-12--00-03-23" -> ["2026-04-12", "00-03-23"]
         llst_date_and_time = lpth_file.stem.split("--")[1:3]
-        ldt_expected = datetime.datetime.strptime(
+        ldt_file_time = datetime.datetime.strptime(
                           f"{llst_date_and_time[0]} {llst_date_and_time[1]}",
                           "%Y-%m-%d %H-%M-%S").replace(tzinfo=datetime.timezone.utc)
 
@@ -186,7 +196,7 @@ def _parse_observation(fs_mtime: str | float,
                       l_err, fs_mtime, fs_filepath)
         return None
 
-    return (ls_station, _round_down_to_slot(ldt_expected)), ldt_arrival_utc
+    return (ls_station, _round_down_to_slot(ldt_file_time)), (ldt_file_time, ldt_arrival_utc)
 
 # ─────────────────────────────────────────────────────────────────────────────────────
 def _load_dbase(fs_dbase_path: str, fdt_now_utc: datetime.datetime,
@@ -201,7 +211,7 @@ def _load_dbase(fs_dbase_path: str, fdt_now_utc: datetime.datetime,
     :param fs_dbase_path: caminho do catalog.db
     :param fdt_now_utc: instante atual, UTC com fuso
     :param fi_window_hours: janela pedida, em horas
-    :returns: ({(estação, horário_esperado): horário_chegada}, última_atualização)
+    :returns: ({(estação, slot): (horário_do_arquivo, horário_chegada)}, última_atualização)
     :raises sqlite3.OperationalError: banco inexistente ou ilegível
     """
     ldt_query_start = fdt_now_utc - datetime.timedelta(
@@ -223,8 +233,8 @@ def _load_dbase(fs_dbase_path: str, fdt_now_utc: datetime.datetime,
         if lt_parsed is None:
             continue
 
-        lt_key, ldt_arrival_utc = lt_parsed
-        ldct_observations[lt_key] = ldt_arrival_utc
+        lt_key, lt_times = lt_parsed
+        ldct_observations[lt_key] = lt_times
 
     return ldct_observations, ldt_last_update
 
@@ -237,7 +247,7 @@ def _list_stations(fdct_observations: dict) -> list:
     observação: 100% MISS).  Estações vistas no banco e ainda desconhecidas
     entram em seguida, em ordem alfabética.
 
-    :param fdct_observations: {(estação, horário_esperado): horário_chegada}
+    :param fdct_observations: {(estação, slot): (horário_do_arquivo, horário_chegada)}
     :returns: lista de estações
     """
     lset_seen = {ls_station for ls_station, _ in fdct_observations}
@@ -279,7 +289,7 @@ def _station_slots(fdct_observations: dict, fs_station: str,
     arquivo pode já ter chegado ao servidor sem que o 21.mvol (sync a cada
     10 min) o tenha gravado no banco.
 
-    :param fdct_observations: {(estação, horário_esperado): horário_chegada}
+    :param fdct_observations: {(estação, slot): (horário_do_arquivo, horário_chegada)}
     :param fs_station: estação
     :param flst_slots: inícios de slot da janela (ver _window_slots)
     :param fdt_pending_start: início do período de carência

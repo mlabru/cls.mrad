@@ -2,7 +2,7 @@
 # Copyright (c) 1995-2026, Instituto de Controle do Espaço Aéreo
 #
 # rsm_cfg.sh
-# configuração compartilhada por rsm_run.sh e rsm_gui.sh.
+# configuração do rsm_run.sh (e de quem precisar dos mesmos caminhos).
 #
 # este arquivo é feito para ser importado com "source", nunca executado
 # diretamente - por isso não declara seu próprio "set -e": herda as opções
@@ -17,7 +17,8 @@
 # remoto nem acesso aos .mvol.
 #
 
-# 2026.nov  mlabru  - met_common.sh -> cls_common.sh (o arquivo saiu de
+# 2026.nov  mlabru  - comentários sem o rsm_gui.sh/rsmGUI.py/PyQt5 (removidos)
+#                   - met_common.sh -> cls_common.sh (o arquivo saiu de
 #                     04.dvl/bash para o repo cls.common); o source do
 #                     arquivo antigo, inexistente, derrubava o rsm_run.sh
 #
@@ -62,7 +63,7 @@ RSM_TMP="${RSM_DATA}/temp"
 # padrão é o mesmo VOL_DBASE_FILE do vol_cfg.sh
 RSM_DBASE_FILE="${RSM_DBASE_FILE:-/home/${USER}/Public/mvol/data/dbase/catalog.db}"
 
-# JSON de status (saída do rsmStatus.py; entrada do rsmPNG.py e do rsmGUI.py)
+# JSON de status (saída do rsmStatus.py; entrada do rsmPNG.py)
 RSM_STATUS_JSON="${RSM_TMP}/rsm_temp.json"
 # PNG estático do monitor (saída do rsmPNG.py)
 RSM_PNG_FILE="${RSM_OUTPUT}/rsm_out.png"
@@ -77,7 +78,7 @@ RSM_LOG_ERR="${RSM_LOGS}/rsm_monrad.err"
 # janela de monitoramento, em horas
 RSM_WINDOW_HOURS=24
 
-# virtualenv com numpy, matplotlib e PyQt5 -- o mesmo ~/.venv do 25.oflow
+# virtualenv com numpy e matplotlib -- o mesmo ~/.venv do 25.oflow
 # (OFL_VENV) e do 27.nowcast (NWC_VENV). Sem ele, usa o python3 do sistema
 # (rsm_activate_venv, em rsm_common.sh)
 RSM_VENV="${RSM_VENV:-${HOME:-/home/$(id -un)}/.venv}"

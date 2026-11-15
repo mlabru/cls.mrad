@@ -8,8 +8,10 @@ constantes do monitor de recepção radar: códigos de status, cores, rótulos,
 limiares de atraso e a lista mínima de estações monitoradas.
 
 é o único lugar onde esses valores são definidos; rsmStatus.py, rsm_figure.py,
-rsmPNG.py e rsmGUI.py só os leem.
+rsmPNG.py e rsm_figure.py só os leem.
 
+2026.nov  mlabru  comentários sem a GUI PyQt (removida); o atraso dos
+                  limiares conta do horário do NOME do arquivo
 2026.out  mlabru  guia de manutenção: CI_DEFAULT_WINDOW_HOURS (antes repetida
                   em rsmStatus, rsmPNG e rsmGUI)
 2026.out  mlabru  banco como única fonte: CI_PENDING_GRACE_MINUTES e
@@ -75,12 +77,13 @@ CI_SLOT_MINUTES = 10
 # slots em uma hora (6)
 CI_SLOTS_PER_HOUR = 60 // CI_SLOT_MINUTES
 
-# janela padrão do monitor, em horas (rsmStatus, rsmPNG e a GUI começam nela)
+# janela padrão do monitor, em horas (rsmStatus e rsmPNG começam nela)
 CI_DEFAULT_WINDOW_HOURS = 24
 
-# limiares de atraso (chegada real - horário esperado, em segundos) --------------------
+# limiares de atraso (chegada no servidor - horário do NOME do arquivo, em segundos) --
+# (não o início do slot: ver rsmStatus.classify_slot)
 
-# até 9 min (inclusive): no prazo
+# até 9 min (inclusive): no prazo -- atraso negativo (relógio do radar adiantado) também
 CI_ON_TIME_MAX_SECONDS = 9 * 60
 # acima de 9 até 20 min (inclusive): atraso pequeno; acima disso: atraso grande
 CI_SMALL_DELAY_MAX_SECONDS = 20 * 60

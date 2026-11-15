@@ -6,6 +6,7 @@ Copyright (c) 1995-2026, Instituto de Controle do Espaço Aéreo
 test_rsmStatus
 testes unitários de rsmStatus
 
+2026.nov  mlabru  atraso medido do horário do arquivo; chegada antes dele = OK
 2026.nov  mlabru  UTC com fuso (sem CDT_OFFSET_UTC): independe do fuso da
                   máquina; generated_at/last_slot; JSON gravado atômico
 2026.out  mlabru  banco como única fonte: testes montam um catalog.db
@@ -38,6 +39,20 @@ CDT_BASE = datetime.datetime(2026, 4, 12, 0, 0, 0, tzinfo=datetime.timezone.utc)
 
 # < classify_slot >─────────────────────────────────────────────────────────────────────
 
+# horário gravado no nome do arquivo: 8 min depois do início do slot (CDT_BASE)
+CDT_FILE_TIME = CDT_BASE + datetime.timedelta(minutes=8)
+
+
+def _received(ff_delay_minutes):
+    """
+    observação do slot CDT_BASE cujo arquivo (CDT_FILE_TIME) chegou com o
+    atraso pedido, em minutos
+    """
+    ldt_arrival = CDT_FILE_TIME + datetime.timedelta(minutes=ff_delay_minutes)
+
+    return {("Cangucu-250", CDT_BASE): (CDT_FILE_TIME, ldt_arrival)}, ldt_arrival
+
+
 def test_classify_slot_missing_when_key_absent():
     """
     se o arquivo esperado não está no dict recebido, o status é MISS
@@ -50,10 +65,9 @@ def test_classify_slot_missing_when_key_absent():
 
 def test_classify_slot_on_time_within_9_minutes():
     """
-    chegada até 9 min após o esperado é considerada no prazo
+    chegada até 9 min após o horário do arquivo é considerada no prazo
     """
-    ldt_arrival = CDT_BASE + datetime.timedelta(minutes=5)
-    ldct_received = {("Cangucu-250", CDT_BASE): ldt_arrival}
+    ldct_received, ldt_arrival = _received(5)
 
     lt_ts, li_status = rs.classify_slot(ldct_received, "Cangucu-250", CDT_BASE)
 
@@ -61,12 +75,23 @@ def test_classify_slot_on_time_within_9_minutes():
     assert lt_ts == ldt_arrival.timestamp()
 
 
+def test_classify_slot_delay_counts_from_file_time_not_slot_start():
+    """
+    arquivo das 00:08 que chega às 00:10 atrasou 2 min (no prazo), não 10 min
+    a partir do início do slot (regressão: era classificado como atraso leve)
+    """
+    ldct_received, _ = _received(2)
+
+    _, li_status = rs.classify_slot(ldct_received, "Cangucu-250", CDT_BASE)
+
+    assert li_status == cfg.CI_ST_OK
+
+
 def test_classify_slot_boundary_9_minutes_is_still_on_time():
     """
-    exatamente 9 min de diferença ainda conta como no prazo (limite inclusive)
+    exatamente 9 min de atraso ainda conta como no prazo (limite inclusive)
     """
-    ldt_arrival = CDT_BASE + datetime.timedelta(minutes=9)
-    ldct_received = {("Cangucu-250", CDT_BASE): ldt_arrival}
+    ldct_received, _ = _received(9)
 
     _, li_status = rs.classify_slot(ldct_received, "Cangucu-250", CDT_BASE)
 
@@ -75,10 +100,9 @@ def test_classify_slot_boundary_9_minutes_is_still_on_time():
 
 def test_classify_slot_small_delay_between_9_and_20_minutes():
     """
-    diferença entre 9 e 20 min é classificada como atraso pequeno (DS)
+    atraso entre 9 e 20 min é classificado como atraso pequeno (DS)
     """
-    ldt_arrival = CDT_BASE + datetime.timedelta(minutes=15)
-    ldct_received = {("Cangucu-250", CDT_BASE): ldt_arrival}
+    ldct_received, _ = _received(15)
 
     _, li_status = rs.classify_slot(ldct_received, "Cangucu-250", CDT_BASE)
 
@@ -87,10 +111,9 @@ def test_classify_slot_small_delay_between_9_and_20_minutes():
 
 def test_classify_slot_boundary_20_minutes_is_still_small_delay():
     """
-    exatamente 20 min de diferença ainda conta como atraso pequeno (limite inclusive)
+    exatamente 20 min de atraso ainda conta como atraso pequeno (limite inclusive)
     """
-    ldt_arrival = CDT_BASE + datetime.timedelta(minutes=20)
-    ldct_received = {("Cangucu-250", CDT_BASE): ldt_arrival}
+    ldct_received, _ = _received(20)
 
     _, li_status = rs.classify_slot(ldct_received, "Cangucu-250", CDT_BASE)
 
@@ -99,26 +122,26 @@ def test_classify_slot_boundary_20_minutes_is_still_small_delay():
 
 def test_classify_slot_large_delay_over_20_minutes():
     """
-    diferença acima de 20 min é classificada como atraso grande (DL)
+    atraso acima de 20 min é classificado como atraso grande (DL)
     """
-    ldt_arrival = CDT_BASE + datetime.timedelta(minutes=25)
-    ldct_received = {("Cangucu-250", CDT_BASE): ldt_arrival}
+    ldct_received, _ = _received(25)
 
     _, li_status = rs.classify_slot(ldct_received, "Cangucu-250", CDT_BASE)
 
     assert li_status == cfg.CI_ST_DL
 
 
-def test_classify_slot_future_when_arrival_before_expected():
+@pytest.mark.parametrize("ff_delay_minutes", [-1, -9, -15])
+def test_classify_slot_arrival_before_file_time_is_on_time(ff_delay_minutes):
     """
-    chegada registrada antes do horário esperado é tratada como FUTURE
+    chegada antes do horário do arquivo (relógio do radar adiantado) conta
+    como no prazo -- o arquivo chegou (antes saía FUTURE, escondido no painel)
     """
-    ldt_arrival = CDT_BASE - datetime.timedelta(minutes=5)
-    ldct_received = {("Cangucu-250", CDT_BASE): ldt_arrival}
+    ldct_received, _ = _received(ff_delay_minutes)
 
     _, li_status = rs.classify_slot(ldct_received, "Cangucu-250", CDT_BASE)
 
-    assert li_status == cfg.CI_ST_FUTURE
+    assert li_status == cfg.CI_ST_OK
 
 # < helpers >──────────────────────────────────────────────────────────────────────────
 
@@ -154,11 +177,14 @@ def test_parse_observation_extracts_station_and_rounds_to_10min_block():
     """
     lf_mtime = 1700000000.0
 
-    lt_key, ldt_arrival = rs._parse_observation(
+    lt_key, (ldt_file_time, ldt_arrival) = rs._parse_observation(
                               lf_mtime, "Cangucu/250/STI-250--2026-04-12--00-03-23.mvol")
 
     assert lt_key == ("Cangucu-250", datetime.datetime(2026, 4, 12, 0, 0, 0,
                                                        tzinfo=datetime.timezone.utc))
+    # o horário exato do arquivo fica junto (o atraso é medido a partir dele)
+    assert ldt_file_time == datetime.datetime(2026, 4, 12, 0, 3, 23,
+                                              tzinfo=datetime.timezone.utc)
     # o mtime é epoch: 1700000000 = 2023-11-14 22:13:20 UTC, em qualquer fuso
     assert ldt_arrival == datetime.datetime(2023, 11, 14, 22, 13, 20,
                                             tzinfo=datetime.timezone.utc)
@@ -174,7 +200,7 @@ def test_parse_observation_does_not_depend_on_host_timezone(monkeypatch, fs_tz):
     time.tzset()
 
     try:
-        lt_key, ldt_arrival = rs._parse_observation(
+        lt_key, (_, ldt_arrival) = rs._parse_observation(
                                   1776002603.0, "Cangucu/250/STI-250--2026-04-12--14-03-23.mvol")
     finally:
         monkeypatch.undo()
