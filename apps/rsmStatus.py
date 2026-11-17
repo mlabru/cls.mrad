@@ -23,6 +23,9 @@ saída:
 tudo é UTC, com fuso explícito: o mtime do banco é um epoch (não tem fuso) e
 o horário no nome do arquivo é UTC.  Não depende do fuso da máquina.
 
+2026.nov  mlabru  aviso no log de relógio do radar adiantado
+                  (_warn_clock_ahead): mediana do atraso negativa esconde o
+                  atraso real, já que chegada antecipada conta como no prazo
 2026.nov  mlabru  limiares de atraso por alcance (_delay_limits,
                   cfg.CDCT_DELAY_LIMITS_BY_RANGE): 250 km = 10/20 min,
                   400 km = 3/10 min; outro alcance, o padrão 9/20
@@ -76,6 +79,7 @@ import json
 import logging
 import pathlib
 import sqlite3
+import statistics
 import sys
 import time
 
@@ -320,6 +324,41 @@ def _list_stations(fdct_observations: dict) -> list:
     return list(cfg.CLST_STATIONS) + sorted(ldct_new_slot_counts)
 
 # ─────────────────────────────────────────────────────────────────────────────────────
+def _warn_clock_ahead(fdct_observations: dict) -> None:
+    """
+    avisa no log as estações cujo relógio parece adiantado.
+
+    chegada antes do horário do nome do arquivo conta como "no prazo" (o
+    arquivo chegou), mas esconde o atraso real.  Se a MEDIANA do atraso
+    (chegada - horário do arquivo) de uma estação fica abaixo de
+    -cfg.CI_CLOCK_AHEAD_WARN_SECONDS, o relógio do radar está adiantado em
+    PELO MENOS esse valor (mais a duração da varredura e da transmissão).
+
+    só avalia estações com cfg.CI_CLOCK_AHEAD_MIN_FILES arquivos na janela ou
+    mais.  Não muda nenhum status: é um aviso para quem cuida do radar.
+
+    :param fdct_observations: {(estação, slot): (horário_do_arquivo, horário_chegada)}
+    """
+    ldct_delays = collections.defaultdict(list)
+
+    for (ls_station, _), (ldt_file_time, ldt_arrival) in fdct_observations.items():
+        ldct_delays[ls_station].append((ldt_arrival - ldt_file_time).total_seconds())
+
+    for ls_station, llst_delays in sorted(ldct_delays.items()):
+        if len(llst_delays) < cfg.CI_CLOCK_AHEAD_MIN_FILES:
+            continue
+
+        lf_median = statistics.median(llst_delays)
+
+        if lf_median >= -cfg.CI_CLOCK_AHEAD_WARN_SECONDS:
+            continue
+
+        M_LOG.warning("relógio do radar adiantado: %s -- arquivos chegam %.0f s ANTES do "
+                      "horário do nome (mediana de %d arquivos); atrasos reais de até "
+                      "esse valor aparecem como no prazo", ls_station, -lf_median,
+                      len(llst_delays))
+
+# ─────────────────────────────────────────────────────────────────────────────────────
 def _window_slots(fdt_start_utc: datetime.datetime,
                   fdt_end_utc: datetime.datetime) -> list:
     """
@@ -451,7 +490,8 @@ def build_station_status(fs_dbase_path: str,
     fluxo:
     1. calcula a janela [agora - horas, agora) em UTC;
     2. lê do catalog.db as observações da janela e a última atualização;
-    3. decide a lista de estações (conhecidas + novas vistas no banco);
+    3. avisa no log as estações com relógio adiantado (_warn_clock_ahead) e
+       decide a lista de estações (conhecidas + novas vistas no banco);
     4. calcula até quando o mvol cobriu o tempo (_source_coverage);
     5. lista os slots da janela e classifica cada slot de cada estação.
 
@@ -475,6 +515,8 @@ def build_station_status(fs_dbase_path: str,
     ldct_observations, ldt_last_update = _load_dbase(fs_dbase_path,
                                                      _round_down_to_slot(ldt_start_utc),
                                                      ldt_end_utc)
+
+    _warn_clock_ahead(ldct_observations)
 
     llst_slots = _window_slots(ldt_start_utc, ldt_end_utc)
     ldt_judged_until, lb_source_fresh = _source_coverage(ldt_last_update, ldt_now_utc)

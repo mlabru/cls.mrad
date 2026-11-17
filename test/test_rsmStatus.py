@@ -6,6 +6,7 @@ Copyright (c) 1995-2026, Instituto de Controle do Espaço Aéreo
 test_rsmStatus
 testes unitários de rsmStatus
 
+2026.nov  mlabru  aviso de relógio do radar adiantado
 2026.nov  mlabru  limiares por alcance (250, 400 e padrão)
 2026.nov  mlabru  estação em manutenção
 2026.nov  mlabru  status "sem fonte": banco vazio, mvol parado, mvol em dia
@@ -546,6 +547,79 @@ def test_known_stations_produce_no_warning(make_dbase, caplog):
         rs.build_station_status(str(lpth), li_window_hours)
 
     assert not [l_rec for l_rec in caplog.records if "CLST_STATIONS" in l_rec.getMessage()]
+
+# < _warn_clock_ahead >───────────────────────────────────────────────────────────────
+
+def _observations_with_delay(fs_station, flst_delay_seconds):
+    """
+    observações de slots consecutivos de uma estação, com os atrasos dados
+    """
+    ldct_obs = {}
+    for li_idx, lf_delay in enumerate(flst_delay_seconds):
+        ldt_slot = CDT_BASE + datetime.timedelta(minutes=cfg.CI_SLOT_MINUTES * li_idx)
+        ldt_arrival = ldt_slot + datetime.timedelta(seconds=lf_delay)
+        ldct_obs[(fs_station, ldt_slot)] = (ldt_slot, ldt_arrival)
+    return ldct_obs
+
+
+def _clock_warnings(fdct_observations, fcaplog):
+    """
+    mensagens de "relógio adiantado" emitidas para as observações dadas
+    """
+    with fcaplog.at_level("WARNING", logger=rs.M_LOG.name):
+        rs._warn_clock_ahead(fdct_observations)
+    return [l_rec.getMessage() for l_rec in fcaplog.records
+            if "relógio do radar adiantado" in l_rec.getMessage()]
+
+
+def test_clock_ahead_warns_when_median_delay_is_negative(caplog):
+    """
+    estação cujos arquivos chegam ~4 min antes do horário do nome (como a
+    Manaus-400 nos dados reais): aviso com o nome e os segundos
+    """
+    ldct_obs = _observations_with_delay("Manaus-400", [-256] * 6)
+
+    llst_msgs = _clock_warnings(ldct_obs, caplog)
+
+    assert len(llst_msgs) == 1
+    assert "Manaus-400" in llst_msgs[0] and "256 s" in llst_msgs[0]
+
+
+@pytest.mark.parametrize("flst_delays", [
+    [65] * 6,                     # 400 km normal
+    [-30] * 6,                    # adiantado menos de 1 min: tolerado
+    [-300] * 5,                   # poucos arquivos para avaliar
+    [-300] * 2 + [65] * 5,        # casos isolados não mudam a mediana
+])
+def test_clock_ahead_does_not_warn(flst_delays, caplog):
+    """
+    sem aviso: atraso normal, adiantamento pequeno, poucos arquivos ou
+    casos isolados
+    """
+    ldct_obs = _observations_with_delay("Gama-400", flst_delays)
+
+    assert _clock_warnings(ldct_obs, caplog) == []
+
+
+def test_clock_ahead_does_not_change_statuses(make_dbase, caplog):
+    """
+    o aviso é só log: o arquivo adiantado continua "no prazo"
+    """
+    li_window_hours = 6
+    ls_station = cfg.CLST_STATIONS[0]
+    ldt_first = _first_slot_of_window(li_window_hours)
+    llst_rows = []
+    for li_idx in range(cfg.CI_CLOCK_AHEAD_MIN_FILES):
+        ls_path, lf_mtime = _row_on_time(ls_station,
+                                         ldt_first + datetime.timedelta(minutes=10 * li_idx))
+        llst_rows.append((ls_path, lf_mtime - 300))
+
+    with caplog.at_level("WARNING", logger=rs.M_LOG.name):
+        ldct_out = rs.build_station_status(str(make_dbase(llst_rows)), li_window_hours)
+
+    llst_status = _statuses(ldct_out, ls_station)
+    assert llst_status[:cfg.CI_CLOCK_AHEAD_MIN_FILES] == [cfg.CI_ST_OK] * cfg.CI_CLOCK_AHEAD_MIN_FILES
+    assert any("relógio do radar adiantado" in l_rec.getMessage() for l_rec in caplog.records)
 
 # < main >─────────────────────────────────────────────────────────────────────────────
 

@@ -10,6 +10,7 @@ limiares de atraso e a lista mínima de estações monitoradas.
 é o único lugar onde esses valores são definidos; rsmStatus.py, rsm_figure.py,
 rsmPNG.py e rsm_figure.py só os leem.
 
+2026.nov  mlabru  aviso de relógio do radar adiantado (CI_CLOCK_AHEAD_*)
 2026.nov  mlabru  limiares de atraso por alcance (CDCT_DELAY_LIMITS_BY_RANGE:
                   250 km = 10/20 min, 400 km = 3/10 min; decisão do
                   usuário, 2026-11-17): o 250 km leva 5-8 min de varredura,
@@ -116,6 +117,18 @@ CDCT_DELAY_LIMITS_BY_RANGE = { "250": (10 * 60, 20 * 60),
 # alcance fora da tabela acima (estação nova): limites padrão
 CI_ON_TIME_MAX_SECONDS = 9 * 60
 CI_SMALL_DELAY_MAX_SECONDS = 20 * 60
+
+# relógio do radar adiantado ----------------------------------------------------------
+# chegada ANTES do horário do nome conta como "no prazo" (o arquivo chegou), mas
+# esconde o atraso real: com o relógio 4 min adiantado, um atraso de 7 min
+# aparece como 3.  Se a MEDIANA do atraso da estação na janela fica abaixo de
+# -CI_CLOCK_AHEAD_WARN_SECONDS, o rsmStatus avisa no log (não muda o status)
+
+# mediana do atraso abaixo de -1 min: relógio adiantado (a mediana, e não um
+# arquivo só, para um caso isolado não disparar o aviso)
+CI_CLOCK_AHEAD_WARN_SECONDS = 60
+# mínimo de arquivos da estação na janela para avaliar (1 h de envios)
+CI_CLOCK_AHEAD_MIN_FILES = 6
 
 # atraso da fonte (21.mvol) ------------------------------------------------------------
 # o monrad só enxerga um arquivo depois que o vol_sync.sh do 21.mvol (cron a cada
