@@ -23,6 +23,8 @@ saída:
 tudo é UTC, com fuso explícito: o mtime do banco é um epoch (não tem fuso) e
 o horário no nome do arquivo é UTC.  Não depende do fuso da máquina.
 
+2026.nov  mlabru  estação em manutenção (cfg.CLST_STATIONS_MAINTENANCE): slot
+                  sem arquivo sai CI_ST_MAINT, não MISS/FUTURE/NOSRC
 2026.nov  mlabru  status "sem fonte" (CI_ST_NOSRC): slot sem observação só é
                   MISS se o mvol registrou algo depois do prazo do slot
                   (max(created_at) >= início + carência); senão é FUTURE
@@ -322,7 +324,7 @@ def _window_slots(fdt_start_utc: datetime.datetime,
 # ─────────────────────────────────────────────────────────────────────────────────────
 def _unseen_status(fdt_slot: datetime.datetime,
                    fdt_judged_until: datetime.datetime | None,
-                   fb_source_fresh: bool) -> int:
+                   fb_source_fresh: bool, fb_maintenance: bool = False) -> int:
     """
     decide o status de um slot SEM observação no banco.
 
@@ -332,6 +334,7 @@ def _unseen_status(fdt_slot: datetime.datetime,
     culpa do radar.
 
     regras:
+    - estação em manutenção                     -> MAINT ("Manutenção")
     - prazo do slot já coberto pelo mvol        -> MISS
     - não coberto, fonte em dia (mvol rodando)  -> FUTURE ("Aguardando")
     - não coberto, fonte parada ou banco vazio  -> NOSRC ("Sem fonte")
@@ -341,8 +344,13 @@ def _unseen_status(fdt_slot: datetime.datetime,
                              agora)), ou None se o banco não tem registro
     :param fb_source_fresh: True se o mvol registrou algo nos últimos
                             CI_SOURCE_STALE_MINUTES
-    :returns: código de status (CI_ST_MISS, CI_ST_FUTURE ou CI_ST_NOSRC)
+    :param fb_maintenance: True se a estação está em cfg.CLST_STATIONS_MAINTENANCE
+    :returns: código de status (CI_ST_MAINT, CI_ST_MISS, CI_ST_FUTURE ou CI_ST_NOSRC)
     """
+    # desligada de propósito: a ausência não é falha, seja qual for a fonte
+    if fb_maintenance:
+        return cfg.CI_ST_MAINT
+
     ldt_deadline = fdt_slot + datetime.timedelta(minutes=cfg.CI_PENDING_GRACE_MINUTES)
 
     if fdt_judged_until is not None and ldt_deadline <= fdt_judged_until:
@@ -361,7 +369,8 @@ def _station_slots(fdct_observations: dict, fs_station: str, flst_slots: list,
     classifica todos os slots de 10 min de uma estação dentro da janela.
 
     slot com observação: classify_slot (pelo atraso).  Slot sem observação:
-    _unseen_status (MISS, FUTURE ou NOSRC, conforme o mvol já o cobriu).
+    _unseen_status (MAINT se a estação está em manutenção; senão MISS, FUTURE
+    ou NOSRC, conforme o mvol já o cobriu).
 
     :param fdct_observations: {(estação, slot): (horário_do_arquivo, horário_chegada)}
     :param fs_station: estação
@@ -372,19 +381,22 @@ def _station_slots(fdct_observations: dict, fs_station: str, flst_slots: list,
     """
     llst_statuses = []
     li_received_count = 0
+    lb_maintenance = fs_station in cfg.CLST_STATIONS_MAINTENANCE
 
     for ldt_slot in flst_slots:
         lf_timestamp, li_status = classify_slot(fdct_observations, fs_station, ldt_slot)
 
         if li_status == cfg.CI_ST_MISS:
-            li_status = _unseen_status(ldt_slot, fdt_judged_until, fb_source_fresh)
+            li_status = _unseen_status(ldt_slot, fdt_judged_until, fb_source_fresh,
+                                       lb_maintenance)
         else:
             li_received_count += 1
 
         llst_statuses.append((lf_timestamp, li_status))
 
-    M_LOG.info("%d/%d registros válidos encontrados para %s.",
-               li_received_count, len(llst_statuses), fs_station)
+    M_LOG.info("%d/%d registros válidos encontrados para %s%s.",
+               li_received_count, len(llst_statuses), fs_station,
+               " (em manutenção)" if lb_maintenance else "")
 
     return llst_statuses
 

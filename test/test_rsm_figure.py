@@ -6,6 +6,7 @@ Copyright (c) 1995-2026, Instituto de Controle do Espaço Aéreo
 test_rsm_figure
 testes unitários de rsm_figure
 
+2026.nov  mlabru  MAINT fora das estatísticas; legenda opcional (NOSRC/MAINT)
 2026.nov  mlabru  NOSRC (sem fonte) fora das estatísticas e na legenda
 2026.nov  mlabru  reference_time/generated_time; eixo e título em UTC
 2026.out  mlabru  _station_percentages (e o total "nunca zero")
@@ -100,6 +101,47 @@ def test_no_source_slots_are_left_out_of_every_statistic():
     li_total, li_on_time, _, li_missing, lf_rate = fig_mod.aggregate_stats({"A-250": llst_slots})
     assert (li_total, li_on_time, li_missing) == (2, 1, 1)
     assert lf_rate == pytest.approx(50.0)
+
+
+def test_maintenance_slots_are_left_out_of_every_statistic():
+    """
+    MAINT (estação em manutenção) fica fora do total e da taxa, como o NOSRC
+    """
+    ldct_data = {"A-250": [(None, cfg.CI_ST_MAINT)] * 6,
+                 "B-250": [(None, cfg.CI_ST_OK), (None, cfg.CI_ST_MISS)]}
+
+    li_total, li_on_time, _, li_missing, lf_rate = fig_mod.aggregate_stats(ldct_data)
+
+    assert (li_total, li_on_time, li_missing) == (2, 1, 1)
+    assert lf_rate == pytest.approx(50.0)
+
+
+def _legend_labels(fdct_data):
+    """
+    rótulos da legenda do grid para os dados dados (1 hora de janela)
+    """
+    ldt_ref = datetime.datetime(2026, 11, 17, 12, 0, tzinfo=datetime.timezone.utc)
+    li_total_slots = len(next(iter(fdct_data.values())))
+    l_figure = fig_mod.build_figure(fdct_data, ldt_ref, li_total_slots, 1)
+
+    return [l_text.get_text() for l_text in l_figure.axes[0].get_legend().get_texts()]
+
+
+def test_legend_shows_optional_statuses_only_when_present():
+    """
+    "Sem fonte" e "Manutenção" só entram na legenda quando aparecem na grade;
+    os quatro status básicos estão sempre lá
+    """
+    ls_nosrc = cfg.CLST_STATUS_LABELS[cfg.CI_ST_NOSRC]
+    ls_maint = cfg.CLST_STATUS_LABELS[cfg.CI_ST_MAINT]
+    llst_basic = [cfg.CLST_STATUS_LABELS[li] for li in fig_mod.CLST_LEGEND_STATUSES]
+
+    llst_plain = _legend_labels({"A-250": [(None, cfg.CI_ST_OK)] * 6})
+    assert llst_plain == llst_basic
+
+    llst_both = _legend_labels({"A-250": [(None, cfg.CI_ST_MAINT)] * 6,
+                                "B-250": [(None, cfg.CI_ST_NOSRC)] * 6})
+    assert llst_both == llst_basic + [ls_nosrc, ls_maint]
 
 
 def test_build_figure_legend_shows_no_source():

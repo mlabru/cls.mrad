@@ -10,6 +10,8 @@ limiares de atraso e a lista mínima de estações monitoradas.
 é o único lugar onde esses valores são definidos; rsmStatus.py, rsm_figure.py,
 rsmPNG.py e rsm_figure.py só os leem.
 
+2026.nov  mlabru  estação em manutenção (CLST_STATIONS_MAINTENANCE,
+                  CI_ST_MAINT): slot sem arquivo não é cobrado dela
 2026.nov  mlabru  status "sem fonte" (CI_ST_NOSRC): slot sem arquivo que o
                   21.mvol, parado, ainda não poderia ter registrado não é
                   culpa do radar -- sai das estatísticas em vez de virar MISS
@@ -48,6 +50,8 @@ CS_C_OK      = "#3fb950"   # verde    - chegou no prazo
 CS_C_FUTURE  = CS_BG_CARD
 # cinza   - sem fonte (o 21.mvol parou de registrar; não dá para julgar o radar)
 CS_C_NOSRC   = "#6e7681"
+# cinza escuro - estação em manutenção (desligada de propósito: não é falha)
+CS_C_MAINT   = "#484f58"
 
 # códigos de status --------------------------------------------------------------------
 # os códigos são índices (0..4) das listas CLST_STATUS_COLORS e
@@ -61,6 +65,7 @@ CI_ST_FUTURE = 2   # slot ainda não venceu (aguardando)
 CI_ST_MISS   = 3   # arquivo não recebido
 CI_ST_OK     = 4   # recebido no prazo
 CI_ST_NOSRC  = 5   # sem fonte: o 21.mvol parou antes de poder registrar o arquivo
+CI_ST_MAINT  = 6   # estação em manutenção (CLST_STATIONS_MAINTENANCE), sem arquivo
 
 # cor de cada status, indexada pelo código
 CLST_STATUS_COLORS = [ CS_C_DELAY_L,      # CI_ST_DL
@@ -68,7 +73,8 @@ CLST_STATUS_COLORS = [ CS_C_DELAY_L,      # CI_ST_DL
                        CS_C_FUTURE,       # CI_ST_FUTURE
                        CS_C_MISS,         # CI_ST_MISS
                        CS_C_OK,           # CI_ST_OK
-                       CS_C_NOSRC ]       # CI_ST_NOSRC
+                       CS_C_NOSRC,        # CI_ST_NOSRC
+                       CS_C_MAINT ]       # CI_ST_MAINT
 
 # rótulo de cada status, indexado pelo código
 CLST_STATUS_LABELS = [ "Atraso grave (>20 min)",    # CI_ST_DL
@@ -76,7 +82,8 @@ CLST_STATUS_LABELS = [ "Atraso grave (>20 min)",    # CI_ST_DL
                        "Aguardando",                # CI_ST_FUTURE
                        "Perdido",                   # CI_ST_MISS
                        "No prazo",                  # CI_ST_OK
-                       "Sem fonte (mvol)" ]         # CI_ST_NOSRC
+                       "Sem fonte (mvol)",          # CI_ST_NOSRC
+                       "Manutenção" ]               # CI_ST_MAINT
 
 # grade de tempo -----------------------------------------------------------------------
 
@@ -135,5 +142,14 @@ CLST_STATIONS = [ "Belem-250",         "Belem-400",
                   "PicoDoCouto-250",   "PicoDoCouto-400",
                   "Santiago-250",      "Santiago-400",
                   "SaoRoque-250",      "SaoRoque-400" ]
+
+# estações em manutenção (ou desativadas): continuam no painel, mas um slot sem
+# arquivo sai "Manutenção" (CI_ST_MAINT), fora das estatísticas, em vez de
+# "Perdido".  Se um arquivo chegar, ele é classificado normalmente.  Cada
+# estação tem de estar em CLST_STATIONS; anote o motivo e a data ao incluir, e
+# tire-a daqui quando voltar a operar -- senão uma falha real fica escondida.
+#   ex.: "Macapa-250",   # radar em reforma desde 2026-08 (OS 1234)
+CLST_STATIONS_MAINTENANCE = frozenset((
+))
 
 # < the end >──────────────────────────────────────────────────────────────────────────

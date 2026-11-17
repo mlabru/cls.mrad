@@ -6,6 +6,7 @@ Copyright (c) 1995-2026, Instituto de Controle do Espaço Aéreo
 test_rsmStatus
 testes unitários de rsmStatus
 
+2026.nov  mlabru  estação em manutenção
 2026.nov  mlabru  status "sem fonte": banco vazio, mvol parado, mvol em dia
 2026.nov  mlabru  robustez: chegada mais cedo em slot duplicado; aviso de
                   estação fora da lista; janela do banco pelo timestamp
@@ -311,6 +312,40 @@ def test_build_station_status_observation_wins_over_stopped_source(make_dbase):
 
     assert llst_status[0] == cfg.CI_ST_OK
     assert set(llst_status[1:]) == {cfg.CI_ST_NOSRC}
+
+
+def test_build_station_status_maintenance_station_is_never_miss(make_dbase, monkeypatch):
+    """
+    estação em manutenção: slot sem arquivo sai MAINT (nem MISS, nem FUTURE),
+    e um arquivo que chegue é classificado normalmente; as outras estações
+    não mudam
+    """
+    li_window_hours = 6
+    ls_maint, ls_other = cfg.CLST_STATIONS[0], cfg.CLST_STATIONS[1]
+    monkeypatch.setattr(cfg, "CLST_STATIONS_MAINTENANCE", frozenset((ls_maint,)))
+    lpth = make_dbase([_row_on_time(ls_maint, _first_slot_of_window(li_window_hours))],
+                      fs_created_at=_iso_minutes_ago(0))
+
+    ldct_out = rs.build_station_status(str(lpth), li_window_hours)
+
+    llst_maint = _statuses(ldct_out, ls_maint)
+    assert llst_maint[0] == cfg.CI_ST_OK
+    assert set(llst_maint[1:]) == {cfg.CI_ST_MAINT}
+    assert cfg.CI_ST_MAINT not in _statuses(ldct_out, ls_other)
+    assert cfg.CI_ST_MISS in _statuses(ldct_out, ls_other)
+
+
+@pytest.mark.parametrize("fs_source", ["fresh", "stopped", "empty"])
+def test_unseen_status_maintenance_wins_over_source_state(fs_source):
+    """
+    manutenção vale com a fonte em dia, parada ou vazia
+    """
+    ldt_now = datetime.datetime(2026, 11, 17, 12, 0, tzinfo=datetime.timezone.utc)
+    ldt_slot = ldt_now - datetime.timedelta(hours=2)
+    ldct_cases = {"fresh": (ldt_now, True), "stopped": (ldt_slot, False), "empty": (None, False)}
+    ldt_judged_until, lb_fresh = ldct_cases[fs_source]
+
+    assert rs._unseen_status(ldt_slot, ldt_judged_until, lb_fresh, True) == cfg.CI_ST_MAINT
 
 
 @pytest.mark.parametrize("fi_minutes_ago, fb_fresh", [(0, True), (29, True), (31, False)])
