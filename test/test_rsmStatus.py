@@ -6,6 +6,7 @@ Copyright (c) 1995-2026, Instituto de Controle do Espaço Aéreo
 test_rsmStatus
 testes unitários de rsmStatus
 
+2026.nov  mlabru  status "sem fonte": banco vazio, mvol parado, mvol em dia
 2026.nov  mlabru  robustez: chegada mais cedo em slot duplicado; aviso de
                   estação fora da lista; janela do banco pelo timestamp
 2026.nov  mlabru  atraso medido do horário do arquivo; chegada antes dele = OK
@@ -222,26 +223,108 @@ def test_parse_observation_returns_none_for_malformed_rows():
 
 # < build_station_status >─────────────────────────────────────────────────────────────
 
-def test_build_station_status_empty_dbase_is_miss_except_grace_period(make_dbase):
+def _iso_minutes_ago(fi_minutes):
     """
-    banco vazio: todo slot é MISS, menos os dos últimos 20 min (carência do
-    sync do mvol), que saem como FUTURE ("Aguardando")
+    created_at (ISO UTC) de fi_minutes atrás, como o mvol grava
+    """
+    ldt_now = datetime.datetime.now(datetime.timezone.utc)
+    return (ldt_now - datetime.timedelta(minutes=fi_minutes)).isoformat()
+
+
+def _statuses(fdct_out, fs_station):
+    """
+    só os códigos de status de uma estação, do slot mais antigo ao mais novo
+    """
+    return [li_status for _, li_status in fdct_out["stations"][fs_station]]
+
+
+def test_build_station_status_empty_dbase_is_all_no_source(make_dbase):
+    """
+    banco vazio: o mvol nunca registrou nada, então nenhum slot pode ser
+    cobrado do radar -- todos saem NOSRC ("Sem fonte"), nenhum MISS
     """
     li_window_hours = 10
     ldct_out = rs.build_station_status(str(make_dbase([])), li_window_hours)
-    ldct_stations = ldct_out["stations"]
 
-    assert set(ldct_stations.keys()) == set(cfg.CLST_STATIONS)
+    assert set(ldct_out["stations"].keys()) == set(cfg.CLST_STATIONS)
 
     for ls_station in cfg.CLST_STATIONS:
-        llst_status = [li_status for _, li_status in ldct_stations[ls_station]]
+        llst_status = _statuses(ldct_out, ls_station)
 
         assert len(llst_status) == li_window_hours * 60 // cfg.CI_SLOT_MINUTES
+        assert set(llst_status) == {cfg.CI_ST_NOSRC}
+
+
+def test_build_station_status_fresh_source_is_miss_except_grace_period(make_dbase):
+    """
+    mvol em dia (registrou agora): todo slot sem arquivo é MISS, menos os dos
+    últimos 20 min (carência do sync do mvol), que saem FUTURE ("Aguardando")
+    -- o comportamento de antes do status "sem fonte"
+    """
+    lpth = make_dbase([("Outro/250/x.mvol", 1.0)], fs_created_at=_iso_minutes_ago(0))
+    ldct_out = rs.build_station_status(str(lpth), 10)
+
+    for ls_station in cfg.CLST_STATIONS:
+        llst_status = _statuses(ldct_out, ls_station)
+
         li_grace_slots = llst_status.count(cfg.CI_ST_FUTURE)
         # slots que COMEÇARAM há menos de 20 min: 1 ou 2, conforme o minuto atual
         assert 1 <= li_grace_slots <= 2
         assert llst_status[-li_grace_slots:] == [cfg.CI_ST_FUTURE] * li_grace_slots
         assert set(llst_status[:-li_grace_slots]) == {cfg.CI_ST_MISS}
+
+
+def test_build_station_status_stopped_source_is_no_source_after_coverage(make_dbase):
+    """
+    mvol parado há 3h: slots cujo prazo (início + 20 min) o mvol ainda cobriu
+    são MISS; os seguintes, até o fim da janela, são NOSRC -- nenhum FUTURE
+    """
+    li_stopped_minutes = 180
+    lpth = make_dbase([("Outro/250/x.mvol", 1.0)],
+                      fs_created_at=_iso_minutes_ago(li_stopped_minutes))
+    ldct_out = rs.build_station_status(str(lpth), 6)
+
+    ldt_last_update = datetime.datetime.fromisoformat(ldct_out["source_last_update"])
+    ldt_grace = datetime.timedelta(minutes=cfg.CI_PENDING_GRACE_MINUTES)
+
+    for ls_station in cfg.CLST_STATIONS:
+        for lf_timestamp, li_status in ldct_out["stations"][ls_station]:
+            ldt_slot = datetime.datetime.fromtimestamp(lf_timestamp, datetime.timezone.utc)
+
+            if ldt_slot + ldt_grace <= ldt_last_update:
+                assert li_status == cfg.CI_ST_MISS
+            else:
+                assert li_status == cfg.CI_ST_NOSRC
+
+
+def test_build_station_status_observation_wins_over_stopped_source(make_dbase):
+    """
+    um arquivo que está no banco é classificado pelo atraso, mesmo depois que o
+    mvol parou: "sem fonte" vale só para slot SEM observação
+    """
+    li_window_hours = 6
+    ls_station = cfg.CLST_STATIONS[0]
+    lpth = make_dbase([_row_on_time(ls_station, _first_slot_of_window(li_window_hours))],
+                      fs_created_at=_iso_minutes_ago(24 * 60))
+
+    llst_status = _statuses(rs.build_station_status(str(lpth), li_window_hours), ls_station)
+
+    assert llst_status[0] == cfg.CI_ST_OK
+    assert set(llst_status[1:]) == {cfg.CI_ST_NOSRC}
+
+
+@pytest.mark.parametrize("fi_minutes_ago, fb_fresh", [(0, True), (29, True), (31, False)])
+def test_source_coverage_freshness_and_clock_cap(fi_minutes_ago, fb_fresh):
+    """
+    a fonte está em dia se registrou algo nos últimos 30 min; a cobertura nunca
+    passa de "agora" (relógio do mvol adiantado)
+    """
+    ldt_now = datetime.datetime(2026, 11, 17, 12, 0, tzinfo=datetime.timezone.utc)
+    ldt_last = ldt_now - datetime.timedelta(minutes=fi_minutes_ago)
+
+    assert rs._source_coverage(ldt_last, ldt_now) == (ldt_last, fb_fresh)
+    assert rs._source_coverage(ldt_now + datetime.timedelta(hours=1), ldt_now) == (ldt_now, True)
+    assert rs._source_coverage(None, ldt_now) == (None, False)
 
 
 def test_build_station_status_small_window_still_covers_full_requested_hours(make_dbase):

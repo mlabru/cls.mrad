@@ -6,6 +6,7 @@ Copyright (c) 1995-2026, Instituto de Controle do Espaço Aéreo
 test_rsm_figure
 testes unitários de rsm_figure
 
+2026.nov  mlabru  NOSRC (sem fonte) fora das estatísticas e na legenda
 2026.nov  mlabru  reference_time/generated_time; eixo e título em UTC
 2026.out  mlabru  _station_percentages (e o total "nunca zero")
 2026.out  mlabru  stations_from_document, source_alert, build_figure com aviso
@@ -83,6 +84,36 @@ def test_station_percentages_ignore_future_and_sum_to_100():
     assert ldct_pct[cfg.CI_ST_DL] == 0
     assert ldct_pct[cfg.CI_ST_MISS] == 25
     assert sum(ldct_pct.values()) == 100
+
+
+def test_no_source_slots_are_left_out_of_every_statistic():
+    """
+    NOSRC (mvol parado) não é sucesso nem falha do radar: fica fora do total,
+    dos percentuais por estação e da taxa de sucesso, como o FUTURE
+    """
+    llst_slots = [(None, cfg.CI_ST_OK), (None, cfg.CI_ST_MISS)] + [(None, cfg.CI_ST_NOSRC)] * 8
+
+    ldct_pct = fig_mod._station_percentages(llst_slots)
+    assert ldct_pct[cfg.CI_ST_OK] == pytest.approx(50.0)
+    assert ldct_pct[cfg.CI_ST_MISS] == pytest.approx(50.0)
+
+    li_total, li_on_time, _, li_missing, lf_rate = fig_mod.aggregate_stats({"A-250": llst_slots})
+    assert (li_total, li_on_time, li_missing) == (2, 1, 1)
+    assert lf_rate == pytest.approx(50.0)
+
+
+def test_build_figure_legend_shows_no_source():
+    """
+    a legenda do grid explica o cinza do "Sem fonte"
+    """
+    li_total_slots = 6
+    ldct_data = {"A-250": [(None, cfg.CI_ST_NOSRC)] * li_total_slots}
+    ldt_ref = datetime.datetime(2026, 11, 17, 12, 0, tzinfo=datetime.timezone.utc)
+
+    l_figure = fig_mod.build_figure(ldct_data, ldt_ref, li_total_slots, 1)
+
+    llst_labels = [l_text.get_text() for l_text in l_figure.axes[0].get_legend().get_texts()]
+    assert cfg.CLST_STATUS_LABELS[cfg.CI_ST_NOSRC] in llst_labels
 
 
 def test_station_percentages_all_future_gives_zero_without_error():

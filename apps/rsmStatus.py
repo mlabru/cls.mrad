@@ -23,6 +23,11 @@ saída:
 tudo é UTC, com fuso explícito: o mtime do banco é um epoch (não tem fuso) e
 o horário no nome do arquivo é UTC.  Não depende do fuso da máquina.
 
+2026.nov  mlabru  status "sem fonte" (CI_ST_NOSRC): slot sem observação só é
+                  MISS se o mvol registrou algo depois do prazo do slot
+                  (max(created_at) >= início + carência); senão é FUTURE
+                  com a fonte em dia, ou NOSRC com ela parada (antes: MISS,
+                  e uma parada do mvol era cobrada dos radares)
 2026.nov  mlabru  robustez: consulta pela coluna timestamp (horário do nome
                   do arquivo, a mesma base da regra de atraso; antes pelo
                   mtime, com 6h de folga); slot com mais de um arquivo fica
@@ -315,20 +320,54 @@ def _window_slots(fdt_start_utc: datetime.datetime,
     return llst_slots
 
 # ─────────────────────────────────────────────────────────────────────────────────────
-def _station_slots(fdct_observations: dict, fs_station: str,
-                   flst_slots: list, fdt_pending_start: datetime.datetime) -> list:
+def _unseen_status(fdt_slot: datetime.datetime,
+                   fdt_judged_until: datetime.datetime | None,
+                   fb_source_fresh: bool) -> int:
+    """
+    decide o status de um slot SEM observação no banco.
+
+    o monrad só vê o que o 21.mvol registrou.  Um arquivo do slot deveria estar
+    no banco até CI_PENDING_GRACE_MINUTES depois do início do slot; só se o
+    mvol registrou alguma coisa depois disso (fdt_judged_until) a ausência é
+    culpa do radar.
+
+    regras:
+    - prazo do slot já coberto pelo mvol        -> MISS
+    - não coberto, fonte em dia (mvol rodando)  -> FUTURE ("Aguardando")
+    - não coberto, fonte parada ou banco vazio  -> NOSRC ("Sem fonte")
+
+    :param fdt_slot: início do slot (UTC)
+    :param fdt_judged_until: até quando o mvol cobriu (min(max(created_at),
+                             agora)), ou None se o banco não tem registro
+    :param fb_source_fresh: True se o mvol registrou algo nos últimos
+                            CI_SOURCE_STALE_MINUTES
+    :returns: código de status (CI_ST_MISS, CI_ST_FUTURE ou CI_ST_NOSRC)
+    """
+    ldt_deadline = fdt_slot + datetime.timedelta(minutes=cfg.CI_PENDING_GRACE_MINUTES)
+
+    if fdt_judged_until is not None and ldt_deadline <= fdt_judged_until:
+        return cfg.CI_ST_MISS
+
+    if fb_source_fresh:
+        return cfg.CI_ST_FUTURE
+
+    return cfg.CI_ST_NOSRC
+
+# ─────────────────────────────────────────────────────────────────────────────────────
+def _station_slots(fdct_observations: dict, fs_station: str, flst_slots: list,
+                   fdt_judged_until: datetime.datetime | None,
+                   fb_source_fresh: bool) -> list:
     """
     classifica todos os slots de 10 min de uma estação dentro da janela.
 
-    carência: um slot sem observação que começou a partir de fdt_pending_start
-    (fim da janela - 20 min) sai como FUTURE ("Aguardando"), não MISS -- o
-    arquivo pode já ter chegado ao servidor sem que o 21.mvol (sync a cada
-    10 min) o tenha gravado no banco.
+    slot com observação: classify_slot (pelo atraso).  Slot sem observação:
+    _unseen_status (MISS, FUTURE ou NOSRC, conforme o mvol já o cobriu).
 
     :param fdct_observations: {(estação, slot): (horário_do_arquivo, horário_chegada)}
     :param fs_station: estação
     :param flst_slots: inícios de slot da janela (ver _window_slots)
-    :param fdt_pending_start: início do período de carência
+    :param fdt_judged_until: até quando o mvol cobriu (ver _unseen_status)
+    :param fb_source_fresh: fonte em dia (ver _unseen_status)
     :returns: lista de (timestamp, código_status), do slot mais antigo ao mais novo
     """
     llst_statuses = []
@@ -337,10 +376,9 @@ def _station_slots(fdct_observations: dict, fs_station: str,
     for ldt_slot in flst_slots:
         lf_timestamp, li_status = classify_slot(fdct_observations, fs_station, ldt_slot)
 
-        if li_status == cfg.CI_ST_MISS and ldt_slot >= fdt_pending_start:
-            li_status = cfg.CI_ST_FUTURE
-
-        if li_status in (cfg.CI_ST_OK, cfg.CI_ST_DS, cfg.CI_ST_DL):
+        if li_status == cfg.CI_ST_MISS:
+            li_status = _unseen_status(ldt_slot, fdt_judged_until, fb_source_fresh)
+        else:
             li_received_count += 1
 
         llst_statuses.append((lf_timestamp, li_status))
@@ -349,6 +387,27 @@ def _station_slots(fdct_observations: dict, fs_station: str,
                li_received_count, len(llst_statuses), fs_station)
 
     return llst_statuses
+
+# ─────────────────────────────────────────────────────────────────────────────────────
+def _source_coverage(fdt_last_update: datetime.datetime | None,
+                     fdt_now_utc: datetime.datetime) -> tuple[datetime.datetime | None, bool]:
+    """
+    diz até quando o 21.mvol cobriu o tempo e se ele está em dia.
+
+    a cobertura é o max(created_at), limitado a "agora": um relógio do mvol
+    adiantado não pode dar como vencido um slot que ainda não venceu.
+
+    :param fdt_last_update: max(created_at) do banco, ou None (sem registro)
+    :param fdt_now_utc: instante atual, UTC
+    :returns: (cobertura ou None, True se houve registro nos últimos
+              CI_SOURCE_STALE_MINUTES)
+    """
+    if fdt_last_update is None:
+        return None, False
+
+    ldt_stale_limit = fdt_now_utc - datetime.timedelta(minutes=cfg.CI_SOURCE_STALE_MINUTES)
+
+    return min(fdt_last_update, fdt_now_utc), fdt_last_update >= ldt_stale_limit
 
 # ─────────────────────────────────────────────────────────────────────────────────────
 def build_station_status(fs_dbase_path: str,
@@ -360,7 +419,8 @@ def build_station_status(fs_dbase_path: str,
     1. calcula a janela [agora - horas, agora) em UTC;
     2. lê do catalog.db as observações da janela e a última atualização;
     3. decide a lista de estações (conhecidas + novas vistas no banco);
-    4. lista os slots da janela e classifica cada slot de cada estação.
+    4. calcula até quando o mvol cobriu o tempo (_source_coverage);
+    5. lista os slots da janela e classifica cada slot de cada estação.
 
     :param fs_dbase_path: catalog.db do 21.mvol (só lido, nunca alterado)
     :param fi_window_hours: janela, em horas
@@ -384,12 +444,12 @@ def build_station_status(fs_dbase_path: str,
                                                      ldt_end_utc)
 
     llst_slots = _window_slots(ldt_start_utc, ldt_end_utc)
-    ldt_pending_start = ldt_end_utc - datetime.timedelta(minutes=cfg.CI_PENDING_GRACE_MINUTES)
+    ldt_judged_until, lb_source_fresh = _source_coverage(ldt_last_update, ldt_now_utc)
 
     ldct_stations = {}
     for ls_station in _list_stations(ldct_observations):
-        ldct_stations[ls_station] = _station_slots(ldct_observations, ls_station,
-                                                   llst_slots, ldt_pending_start)
+        ldct_stations[ls_station] = _station_slots(ldct_observations, ls_station, llst_slots,
+                                                   ldt_judged_until, lb_source_fresh)
 
     ls_last_update = None
     if ldt_last_update is not None:

@@ -20,6 +20,8 @@ saída: uma matplotlib Figure com três painéis empilhados:
 
 não faz I/O nem abre janela -- por isso é testável sem display.
 
+2026.nov  mlabru  status "sem fonte" (NOSRC): fora das estatísticas, como o
+                  FUTURE, e na legenda do grid
 2026.nov  mlabru  docstrings sem a GUI PyQt (removida)
 2026.nov  mlabru  eixo e título em UTC, pelo próprio JSON: reference_time
                   (last_slot) e generated_time (generated_at); antes o
@@ -84,7 +86,12 @@ CF_CARD_VALUE_Y = 0.38
 CF_CARD_FOOTNOTE_Y = 0.10
 
 # status mostrados na legenda do grid (FUTURE fica de fora: é "vazio")
-CLST_LEGEND_STATUSES = [cfg.CI_ST_OK, cfg.CI_ST_DS, cfg.CI_ST_DL, cfg.CI_ST_MISS]
+CLST_LEGEND_STATUSES = [cfg.CI_ST_OK, cfg.CI_ST_DS, cfg.CI_ST_DL, cfg.CI_ST_MISS,
+                        cfg.CI_ST_NOSRC]
+
+# status que não julgam o radar e por isso ficam fora de toda estatística:
+# FUTURE (slot ainda não venceu) e NOSRC (o 21.mvol parou antes de registrá-lo)
+CSET_UNJUDGED_STATUSES = frozenset((cfg.CI_ST_FUTURE, cfg.CI_ST_NOSRC))
 
 # < logging >──────────────────────────────────────────────────────────────────────────
 
@@ -251,10 +258,10 @@ def _station_order(fdct_data: dict) -> list:
 # ─────────────────────────────────────────────────────────────────────────────────────
 def _count_statuses(flst_slots: list) -> collections.defaultdict:
     """
-    conta quantos slots há de cada status, ignorando os FUTURE.
+    conta quantos slots há de cada status, ignorando FUTURE e NOSRC.
 
-    FUTURE (slot que ainda não venceu) não é sucesso nem falha, por isso não
-    entra em nenhuma estatística.
+    FUTURE (slot que ainda não venceu) e NOSRC (sem fonte: o mvol parou) não
+    são sucesso nem falha do radar, por isso não entram em nenhuma estatística.
 
     :param flst_slots: lista de (timestamp, código_status)
     :returns: dicionário {código_status: quantidade} (0 para códigos ausentes)
@@ -262,7 +269,7 @@ def _count_statuses(flst_slots: list) -> collections.defaultdict:
     ldct_counts = collections.defaultdict(int)
 
     for _, li_status in flst_slots:
-        if li_status == cfg.CI_ST_FUTURE:
+        if li_status in CSET_UNJUDGED_STATUSES:
             continue
         ldct_counts[li_status] += 1
 
@@ -273,7 +280,7 @@ def _nonzero_total(fdct_counts: dict) -> int:
     """
     soma as contagens de status, para servir de divisor nos percentuais.
 
-    se só havia slots FUTURE a soma seria 0; devolve 1 nesse caso, para
+    se só havia slots FUTURE ou NOSRC a soma seria 0; devolve 1 nesse caso, para
     evitar divisão por zero (todos os percentuais saem 0%).
 
     :param fdct_counts: {código_status: quantidade}, como em _count_statuses
@@ -293,7 +300,7 @@ def aggregate_stats(fdct_data: dict) -> tuple[int, int, int, int, float]:
 
     :param fdct_data: status por estação
     :returns: (total, no_prazo, atrasados, perdidos, taxa_de_sucesso_%).
-              total nunca é 0 (vale 1 quando só há FUTURE), para evitar
+              total nunca é 0 (vale 1 quando só há FUTURE/NOSRC), para evitar
               divisão por zero nos percentuais
     """
     ldct_counts = collections.defaultdict(int)
@@ -426,12 +433,12 @@ def _draw_status_grid(fax: Axes, fdct_data: dict, flst_stations: list,
     fax.legend(handles=llst_legend_patches, loc="upper right", frameon=True,
                facecolor=cfg.CS_BG_PANEL, edgecolor=cfg.CS_GRAY,
                labelcolor=cfg.CS_TEXT_MAIN, fontsize=8.5,
-               ncol=4, columnspacing=1.2, handlelength=1.4)
+               ncol=len(CLST_LEGEND_STATUSES), columnspacing=1.2, handlelength=1.4)
 
 # ─────────────────────────────────────────────────────────────────────────────────────
 def _station_percentages(flst_slots: list) -> dict:
     """
-    calcula o % de cada status de UMA estação (FUTURE ignorado).
+    calcula o % de cada status de UMA estação (FUTURE e NOSRC ignorados).
 
     :param flst_slots: lista de (timestamp, código_status) da estação
     :returns: {código_status: percentual 0..100} para cada status de

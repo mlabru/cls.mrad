@@ -6,6 +6,7 @@ Copyright (c) 1995-2026, Instituto de Controle do Espaço Aéreo
 test_rsm_config
 testes unitários de rsm_config
 
+2026.nov  mlabru  código CI_ST_NOSRC (sem fonte)
 2026.out  mlabru  work.rsm_config; limiares nomeados
 2026.ago  mlabru  initial version (Linux/Python)
 """
@@ -32,7 +33,7 @@ def test_status_codes_are_unique_sequential_indices():
     os códigos de status devem formar um conjunto de índices 0..N-1 sem furos
     """
     lst_codes = [cfg.CI_ST_DL, cfg.CI_ST_DS, cfg.CI_ST_FUTURE,
-                 cfg.CI_ST_MISS, cfg.CI_ST_OK]
+                 cfg.CI_ST_MISS, cfg.CI_ST_OK, cfg.CI_ST_NOSRC]
 
     assert sorted(lst_codes) == list(range(len(lst_codes)))
 
@@ -42,7 +43,7 @@ def test_status_colors_and_labels_cover_every_status_code():
     cada código de status deve ter uma cor e um label correspondentes
     """
     lst_codes = [cfg.CI_ST_DL, cfg.CI_ST_DS, cfg.CI_ST_FUTURE,
-                 cfg.CI_ST_MISS, cfg.CI_ST_OK]
+                 cfg.CI_ST_MISS, cfg.CI_ST_OK, cfg.CI_ST_NOSRC]
 
     assert len(cfg.CLST_STATUS_COLORS) == len(lst_codes)
     assert len(cfg.CLST_STATUS_LABELS) == len(lst_codes)

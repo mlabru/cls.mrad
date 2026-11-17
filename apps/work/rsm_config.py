@@ -10,6 +10,9 @@ limiares de atraso e a lista mínima de estações monitoradas.
 é o único lugar onde esses valores são definidos; rsmStatus.py, rsm_figure.py,
 rsmPNG.py e rsm_figure.py só os leem.
 
+2026.nov  mlabru  status "sem fonte" (CI_ST_NOSRC): slot sem arquivo que o
+                  21.mvol, parado, ainda não poderia ter registrado não é
+                  culpa do radar -- sai das estatísticas em vez de virar MISS
 2026.nov  mlabru  comentários sem a GUI PyQt (removida); o atraso dos
                   limiares conta do horário do NOME do arquivo
 2026.out  mlabru  guia de manutenção: CI_DEFAULT_WINDOW_HOURS (antes repetida
@@ -43,6 +46,8 @@ CS_C_MISS    = "#f85149"   # vermelho - perdido
 CS_C_OK      = "#3fb950"   # verde    - chegou no prazo
 # slot que ainda não venceu: mesma cor do fundo dos cards, para "sumir" no grid
 CS_C_FUTURE  = CS_BG_CARD
+# cinza   - sem fonte (o 21.mvol parou de registrar; não dá para julgar o radar)
+CS_C_NOSRC   = "#6e7681"
 
 # códigos de status --------------------------------------------------------------------
 # os códigos são índices (0..4) das listas CLST_STATUS_COLORS e
@@ -55,20 +60,23 @@ CI_ST_DS     = 1   # atraso pequeno (delay small)
 CI_ST_FUTURE = 2   # slot ainda não venceu (aguardando)
 CI_ST_MISS   = 3   # arquivo não recebido
 CI_ST_OK     = 4   # recebido no prazo
+CI_ST_NOSRC  = 5   # sem fonte: o 21.mvol parou antes de poder registrar o arquivo
 
 # cor de cada status, indexada pelo código
 CLST_STATUS_COLORS = [ CS_C_DELAY_L,      # CI_ST_DL
                        CS_C_DELAY_S,      # CI_ST_DS
                        CS_C_FUTURE,       # CI_ST_FUTURE
                        CS_C_MISS,         # CI_ST_MISS
-                       CS_C_OK ]          # CI_ST_OK
+                       CS_C_OK,           # CI_ST_OK
+                       CS_C_NOSRC ]       # CI_ST_NOSRC
 
 # rótulo de cada status, indexado pelo código
 CLST_STATUS_LABELS = [ "Atraso grave (>20 min)",    # CI_ST_DL
                        "Atraso leve (9–20 min)",    # CI_ST_DS
                        "Aguardando",                # CI_ST_FUTURE
                        "Perdido",                   # CI_ST_MISS
-                       "No prazo" ]                 # CI_ST_OK
+                       "No prazo",                  # CI_ST_OK
+                       "Sem fonte (mvol)" ]         # CI_ST_NOSRC
 
 # grade de tempo -----------------------------------------------------------------------
 
@@ -92,12 +100,15 @@ CI_SMALL_DELAY_MAX_SECONDS = 20 * 60
 # o monrad só enxerga um arquivo depois que o vol_sync.sh do 21.mvol (cron a cada
 # 10 min) o grava no catalog.db.  Por isso:
 
-# slot sem observação mais novo que (agora - carência) ainda não é "perdido":
-# aparece como "Aguardando" (FUTURE) até o mvol ter tido tempo de registrá-lo
+# tempo, contado do início do slot, que o mvol leva para registrar o arquivo.
+# Slot sem observação só vira "perdido" (MISS) se o mvol registrou algo DEPOIS
+# disso (max(created_at) >= início + carência); antes, é "Aguardando" (FUTURE)
+# ou, com a fonte parada, "Sem fonte" (NOSRC) -- ver rsmStatus._unseen_status
 CI_PENDING_GRACE_MINUTES = 20
 
 # sem NENHUMA observação nova no banco há mais que isto (3 ciclos do vol_sync),
-# o painel avisa que a fonte pode estar parada
+# a fonte é dada como parada: o painel avisa e os slots que o mvol não chegou a
+# cobrir saem como "Sem fonte"
 CI_SOURCE_STALE_MINUTES = 30
 
 # painel de métricas (rsm_figure.py) ---------------------------------------------------
