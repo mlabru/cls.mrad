@@ -11,7 +11,7 @@
 #
 # todas as variáveis têm o prefixo RSM_ (exceto GI_LOG_MAX_SIZE, lida pelo
 # cls_common.sh).  As marcadas com ${X:-padrão} aceitam override pelo ambiente
-# (é assim que o cls.tst aponta o monrad para o ambiente de teste).
+# (é assim que o cls.test aponta o monrad para o ambiente de teste).
 #
 # a única fonte de dados do monrad é o catalog.db do 21.mvol: não há servidor
 # remoto nem acesso aos .mvol.
