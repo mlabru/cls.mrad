@@ -63,6 +63,7 @@ def make_dbase(tmp_path):
     :returns: função que cria o banco e devolve o seu caminho
     """
     # locals (import tardio: precisa do pythonpath do pytest.ini)
+    import cls_common.dbase.schema as sc
     import cls_common.dbase.vol_catalog as ct
 
     def _make(flst_rows: list, fs_created_at: str | None = None):
@@ -72,9 +73,9 @@ def make_dbase(tmp_path):
         l_created_at = fs_created_at or None
 
         lpth_dbase = tmp_path / "catalog.db"
+        # esquema do catalog.db como em produção (migrado no deploy)
+        sc.migrate(str(lpth_dbase))
         l_conn = sqlite3.connect(str(lpth_dbase))
-        l_conn.execute(ct.CS_CREATE_TABLE)
-        l_conn.execute(ct.CS_CREATE_INDEX)
         l_conn.executemany(f"INSERT INTO {ct.CS_TABLE} "
                            "(fullpath, mtime, timestamp, source, created_at) "
                            "VALUES (?, ?, ?, 'mvol', ?)",

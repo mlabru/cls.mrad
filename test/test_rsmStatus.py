@@ -461,7 +461,9 @@ def test_main_writes_status_document(make_dbase, tmp_path):
     ldct = json.loads(lpth_out.read_text(encoding="utf-8"))
     assert set(ldct.keys()) == {"generated_at", "last_slot", "source_last_update", "stations"}
     # gravação atômica: nenhum temporário sobra no diretório
-    assert sorted(os.listdir(tmp_path)) == ["catalog.db", "out.json"]
+    # -wal/-shm são do modo WAL do catalog.db (o de produção também é WAL)
+    assert sorted(ls for ls in os.listdir(tmp_path)
+                  if not ls.endswith(("-wal", "-shm"))) == ["catalog.db", "out.json"]
 
 
 def test_main_missing_dbase_returns_1_without_output(tmp_path):
