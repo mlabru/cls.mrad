@@ -10,7 +10,7 @@
 #
 # pré-requisito: rsm_cfg.sh já importado (ele define RSM_LOG_APP,
 # RSM_LOG_ERR, RSM_PATH, RSM_LIB_DIR e GI_LOG_MAX_SIZE e importa o
-# cls_common.sh, de onde vêm met_log e check_log_size).
+# cls_common.sh, de onde vêm cls_log e check_log_size).
 #
 # 2026.nov  mlabru  - comentários sem o rsm_gui.sh/PyQt5 (removidos)
 #
@@ -18,7 +18,7 @@
 #                     mesmo do 25.oflow e do 27.nowcast)
 #                   - refatoração para legibilidade: o source repetido do
 #                     met_common.sh saiu (o rsm_cfg.sh já o importa)
-#                   - log() sobre met_log (UTC, rotação); rsm_setup
+#                   - log() sobre cls_log (UTC, rotação); rsm_setup
 #
 # 2026.ago  mlabru  initial version (Linux/Bash)
 #
@@ -33,7 +33,7 @@
 #
 log()
 {
-    met_log "${RSM_LOG_APP}" "${RSM_LOG_ERR}" "$@"
+    cls_log "${RSM_LOG_APP}" "${RSM_LOG_ERR}" "$@"
 
 } # log
 

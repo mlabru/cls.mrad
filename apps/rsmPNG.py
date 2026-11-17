@@ -127,7 +127,7 @@ def main(flst_argv: list | None = None) -> int:
 # this is the bootstrap process
 
 if "__main__" == __name__:
-    # log em UTC, como os demais projetos met
+    # log em UTC, como os demais projetos cls
     logging.Formatter.converter = time.gmtime
     logging.basicConfig(datefmt="%Y/%m/%d %H:%M:%S",
                         format="%(asctime)s %(levelname)s %(message)s",

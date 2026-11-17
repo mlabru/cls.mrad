@@ -17,6 +17,7 @@ fixtures e configuração compartilhada dos testes
 # < imports >──────────────────────────────────────────────────────────────────────────
 
 # python library
+import os
 import datetime
 import sqlite3
 
@@ -83,5 +84,11 @@ def make_dbase(tmp_path):
         return lpth_dbase
 
     return _make
+
+# < ambiente cls >─────────────────────────────────────────────────────────────────────
+
+# a suíte não depende do cls.env de quem a roda (~/.config/cls/cls.env): os
+# scripts shell testados herdam este ambiente e não carregam nada de lá
+os.environ["CLS_ENV_FILE"] = os.devnull
 
 # < the end >──────────────────────────────────────────────────────────────────────────

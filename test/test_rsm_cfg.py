@@ -5,7 +5,7 @@ Copyright (c) 1995-2026, Instituto de Controle do Espaço Aéreo
 
 test_rsm_cfg
 testes do rsm_cfg.sh: padrões de produção, override pelo ambiente, trava
-MET_ENV=test e o setup (rsm_setup do rsm_common.sh: mkdir + cd em
+CLS_ENV=test e o setup (rsm_setup do rsm_common.sh: mkdir + cd em
 RSM_PATH, PYTHONPATH em apps/)
 
 2026.out  mlabru  RSM_VENV (padrão ~/.venv); RSM_PATH padrão ~/Public/mrad
@@ -13,7 +13,7 @@ RSM_PATH, PYTHONPATH em apps/)
                   trava -r); RSM_DBASE_FILE padrão = banco do mvol
 2026.out  mlabru  REMOTE_* -> RSM_REMOTE_*; o setup saiu do source do
                   rsm_cfg.sh (sem RSM_CFG_NO_SETUP) para rsm_setup; ".." não
-                  escapa da raiz (met_check_test_env usa realpath -m)
+                  escapa da raiz (cls_check_test_env usa realpath -m)
 2026.out  mlabru  initial version (Linux/Python)
 """
 # < imports >──────────────────────────────────────────────────────────────────────────
@@ -63,8 +63,8 @@ def _tst_env(fpth_root: pathlib.Path, **kwargs) -> dict:
     """
     ambiente de teste coerente (como o tst_env/env.sh), com overrides
     """
-    ldct = {"MET_ENV": "test",
-            "MET_TST_ROOT": str(fpth_root),
+    ldct = {"CLS_ENV": "test",
+            "CLS_TST_ROOT": str(fpth_root),
             "RSM_PATH": str(fpth_root / "mrad"),
             "RSM_DBASE_FILE": str(fpth_root / "mvol" / "data" / "dbase" / "catalog.db")}
     ldct.update(kwargs)

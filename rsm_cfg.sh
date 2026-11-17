@@ -7,7 +7,7 @@
 # este arquivo é feito para ser importado com "source", nunca executado
 # diretamente - por isso não declara seu próprio "set -e": herda as opções
 # de shell do script que o importa.  Só define variáveis (e aplica a trava
-# MET_ENV=test): o mkdir/cd/PYTHONPATH é a função rsm_setup (rsm_common.sh).
+# CLS_ENV=test): o mkdir/cd/PYTHONPATH é a função rsm_setup (rsm_common.sh).
 #
 # todas as variáveis têm o prefixo RSM_ (exceto GI_LOG_MAX_SIZE, lida pelo
 # cls_common.sh).  As marcadas com ${X:-padrão} aceitam override pelo ambiente
@@ -17,6 +17,12 @@
 # remoto nem acesso aos .mvol.
 #
 
+# 2026.nov  mlabru  - cls.env (CLS_ENV_FILE, padrão ~/.config/cls/cls.env)
+#                     carregado antes dos padrões; cls_common.sh vem de
+#                     CLS_LIB, com o symlink ao lado do script como reserva
+#                   - prefixo met -> cls (cls_log, cls_check_test_env,
+#                     CLS_ENV, CLS_TST_ROOT)
+#
 # 2026.nov  mlabru  - comentários sem o rsm_gui.sh/rsmGUI.py/PyQt5 (removidos)
 #                   - met_common.sh -> cls_common.sh (o arquivo saiu de
 #                     04.dvl/bash para o repo cls.common); o source do
@@ -34,9 +40,9 @@
 #                     RSM_OUT_FILE -> RSM_LISTING_FILE (nomes que dizem o
 #                     que o arquivo é)
 #                   - REMOTE_* -> RSM_REMOTE_*; setup movido para rsm_setup;
-#                     trava via met_check_test_env (realpath -m)
+#                     trava via cls_check_test_env (realpath -m)
 #                   - ambiente de teste: override pelo ambiente e trava
-#                     MET_ENV=test; RSM_LIB_DIR
+#                     CLS_ENV=test; RSM_LIB_DIR
 #
 # 2026.ago  mlabru  initial version (Linux/Bash)
 #
@@ -47,6 +53,13 @@
 
 # diretório do código (este arquivo, os scripts e apps/)
 RSM_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# ambiente da instalação (cls.env: CLS_LIB e sobreposições), carregado
+# antes dos padrões abaixo; "set -a" exporta para os programas Python.
+# Precedência: ambiente do processo > cls.env > padrões deste arquivo (ver
+# cls.common/etc/cls.env.example)
+CLS_ENV_FILE="${CLS_ENV_FILE:-${HOME:-}/.config/cls/cls.env}"
+if [ -r "${CLS_ENV_FILE}" ]; then set -a; source "${CLS_ENV_FILE}"; set +a; fi
 
 # raiz dos dados e logs do monrad
 RSM_PATH="${RSM_PATH:-/home/${USER}/Public/mrad}"
@@ -88,11 +101,11 @@ GI_LOG_MAX_SIZE=$((10 * 1024 * 1024))
 
 # < trava do ambiente de teste >-------------------------------------------------------
 
-# met_check_test_env (cls_common.sh, symlink para o repo cls.common, comum
-# aos projetos met)
-source "${RSM_LIB_DIR}/cls_common.sh"
+# cls_check_test_env (cls_common.sh, de CLS_LIB ou do symlink ao lado; comum
+# aos projetos cls)
+source "${CLS_LIB:-${RSM_LIB_DIR}}/cls_common.sh"
 
-# com MET_ENV=test, nada pode apontar para fora de MET_TST_ROOT
-met_check_test_env "${RSM_PATH}" "${RSM_DBASE_FILE}" || exit 1
+# com CLS_ENV=test, nada pode apontar para fora de CLS_TST_ROOT
+cls_check_test_env "${RSM_PATH}" "${RSM_DBASE_FILE}" || exit 1
 
 # < the end >--------------------------------------------------------------------------
