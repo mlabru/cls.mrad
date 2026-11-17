@@ -17,6 +17,13 @@
 # remoto nem acesso aos .mvol.
 #
 
+# 2026.nov  mlabru  CLS_LIB obrigatória (passo 2): sai o symlink cls_common.sh
+#                   da raiz do repo; sem cls.env/CLS_LIB, erro explícito
+#
+# 2026.nov  mlabru  - banco/CAPPIs compartilhados: sem sobreposição própria,
+#                     vêm de CLS_DBASE_FILE/CLS_CAPPI_DIR (cls.env, sob
+#                     CLS_ROOT) antes do padrão antigo
+#
 # 2026.nov  mlabru  - cls.env (CLS_ENV_FILE, padrão ~/.config/cls/cls.env)
 #                     carregado antes dos padrões; cls_common.sh vem de
 #                     CLS_LIB, com o symlink ao lado do script como reserva
@@ -73,8 +80,9 @@ RSM_TMP="${RSM_DATA}/temp"
 
 # catalog.db do 21.mvol: ÚNICA fonte de dados do monrad (tabela
 # vol_raw_observations, gravada SÓ pelo 21.mvol; o monrad apenas lê).  O
-# padrão é o mesmo VOL_DBASE_FILE do vol_cfg.sh
-RSM_DBASE_FILE="${RSM_DBASE_FILE:-/home/${USER}/Public/mvol/data/dbase/catalog.db}"
+# padrão é o mesmo VOL_DBASE_FILE do vol_cfg.sh.  Ordem: RSM_DBASE_FILE >
+# CLS_DBASE_FILE (cls.env, raiz CLS_ROOT) > padrão
+RSM_DBASE_FILE="${RSM_DBASE_FILE:-${CLS_DBASE_FILE:-/home/${USER}/Public/mvol/data/dbase/catalog.db}}"
 
 # JSON de status (saída do rsmStatus.py; entrada do rsmPNG.py)
 RSM_STATUS_JSON="${RSM_TMP}/rsm_temp.json"
@@ -101,9 +109,15 @@ GI_LOG_MAX_SIZE=$((10 * 1024 * 1024))
 
 # < trava do ambiente de teste >-------------------------------------------------------
 
-# cls_check_test_env (cls_common.sh, de CLS_LIB ou do symlink ao lado; comum
-# aos projetos cls)
-source "${CLS_LIB:-${RSM_LIB_DIR}}/cls_common.sh"
+# cls_check_test_env (cls_common.sh, de CLS_LIB, do cls.env;
+# comum aos projetos cls)
+# CLS_LIB (cls.env) é obrigatória: sem ela não há cls_common.sh -- falha
+# aqui, com a causa, em vez de num "command not found" mais adiante
+if [ ! -r "${CLS_LIB:-}/cls_common.sh" ]; then
+    echo "[error]: CLS_LIB='${CLS_LIB:-}' sem cls_common.sh; defina-a no cls.env (${CLS_ENV_FILE:-~/.config/cls/cls.env})" >&2
+    exit 1
+fi
+source "${CLS_LIB}/cls_common.sh"
 
 # com CLS_ENV=test, nada pode apontar para fora de CLS_TST_ROOT
 cls_check_test_env "${RSM_PATH}" "${RSM_DBASE_FILE}" || exit 1
