@@ -61,7 +61,7 @@ def _source(fdct_env: dict, fb_setup: bool = False,
 # -------------------------------------------------------------------------------------
 def _tst_env(fpth_root: pathlib.Path, **kwargs) -> dict:
     """
-    ambiente de teste coerente (como o tst_env/env.sh), com overrides
+    ambiente de teste coerente (como o env.sh do cls.tst), com overrides
     """
     ldct = {"CLS_ENV": "test",
             "CLS_TST_ROOT": str(fpth_root),
