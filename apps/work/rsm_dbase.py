@@ -13,6 +13,8 @@ não cria o banco, não cria tabela, não grava e não apaga nada.  A
 interpretação de cada linha (sítio, alcance, slot esperado, offset UTC) é
 feita por quem lê (rsmStatus._parse_observation).
 
+2026.nov  mlabru  imports cls_common.* (pacote do repo cls.common, via
+                  CLS_PYLIB; antes symlinks de diretório)
 2026.nov  mlabru  fetch_observations filtra pela coluna timestamp (horário
                   do nome do arquivo; índice próprio no mvol), janela
                   semiaberta [início, fim)
@@ -36,7 +38,7 @@ import sqlite3
 import urllib.parse
 
 # locals
-import mvol.vol_catalog as ct
+import cls_common.dbase.vol_catalog as ct
 
 # < constants >────────────────────────────────────────────────────────────────────────
 

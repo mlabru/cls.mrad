@@ -50,7 +50,7 @@ rsm_setup()
     mkdir -p "${RSM_PATH}"
     cd "${RSM_PATH}" || return 1
 
-    export PYTHONPATH="${RSM_LIB_DIR}/apps"
+    export PYTHONPATH="${RSM_LIB_DIR}/apps${PYTHONPATH:+:${PYTHONPATH}}"
 
 } # rsm_setup
 

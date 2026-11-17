@@ -136,6 +136,6 @@ def test_setup_cria_rsm_path_e_aponta_para_apps(tmp_path):
     lproc = _source(_tst_env(tmp_path), fb_setup=True, fs_body='pwd; echo "$PYTHONPATH"')
 
     assert 0 == lproc.returncode, lproc.stderr
-    assert [str(tmp_path / "mrad"), str(MPTH_ROOT / "apps")] == lproc.stdout.splitlines()
+    assert [str(tmp_path / "mrad"), f'{MPTH_ROOT / "apps"}:{os.environ["CLS_PYLIB"]}'] == lproc.stdout.splitlines()
 
 # < the end >──────────────────────────────────────────────────────────────────────────

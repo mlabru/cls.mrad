@@ -25,7 +25,7 @@ import sqlite3
 import pytest
 
 # locals
-import mvol.vol_catalog as ct
+import cls_common.dbase.vol_catalog as ct
 import work.rsm_dbase as rsm_dbase
 
 # < connect >──────────────────────────────────────────────────────────────────────────

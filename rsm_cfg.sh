@@ -17,6 +17,9 @@
 # remoto nem acesso aos .mvol.
 #
 
+# 2026.nov  mlabru  cls_setup_pythonpath: pacote Python comum (cls_common)
+#                   por CLS_PYLIB, no lugar dos symlinks apps/{dbase,radar,util}
+#
 # 2026.nov  mlabru  CLS_LIB obrigatória (passo 2): sai o symlink cls_common.sh
 #                   da raiz do repo; sem cls.env/CLS_LIB, erro explícito
 #
@@ -121,5 +124,11 @@ source "${CLS_LIB}/cls_common.sh"
 
 # com CLS_ENV=test, nada pode apontar para fora de CLS_TST_ROOT
 cls_check_test_env "${RSM_PATH}" "${RSM_DBASE_FILE}" || exit 1
+
+# < pacote Python comum >--------------------------------------------------------------
+
+# cls_common (dbase, radar, util; CLS_PYLIB no cls.env) no PYTHONPATH,
+# exportado para todo programa Python chamado daqui (cls_common.sh)
+cls_setup_pythonpath || exit 1
 
 # < the end >--------------------------------------------------------------------------
