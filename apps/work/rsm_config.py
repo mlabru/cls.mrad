@@ -10,6 +10,11 @@ limiares de atraso e a lista mínima de estações monitoradas.
 é o único lugar onde esses valores são definidos; rsmStatus.py, rsm_figure.py,
 rsmPNG.py e rsm_figure.py só os leem.
 
+2026.nov  mlabru  limiares de atraso por alcance (CDCT_DELAY_LIMITS_BY_RANGE:
+                  250 km = 10/20 min, 400 km = 3/10 min; decisão do
+                  usuário, 2026-11-17): o 250 km leva 5-8 min de varredura,
+                  o 400 km ~1 min, e um limiar único de 9 min não via
+                  atraso no 400 km; rótulos dos atrasos sem minutos
 2026.nov  mlabru  estação em manutenção (CLST_STATIONS_MAINTENANCE,
                   CI_ST_MAINT): slot sem arquivo não é cobrado dela
 2026.nov  mlabru  status "sem fonte" (CI_ST_NOSRC): slot sem arquivo que o
@@ -42,8 +47,8 @@ CS_TEXT_MAIN = "#e6edf3"
 CS_TEXT_SUB  = "#8b949e"
 
 # cor de cada status
-CS_C_DELAY_L = "#db6d28"   # laranja  - atraso grande (> 20 min)
-CS_C_DELAY_S = "#d29922"   # âmbar    - atraso pequeno (9 a 20 min)
+CS_C_DELAY_L = "#db6d28"   # laranja  - atraso grande
+CS_C_DELAY_S = "#d29922"   # âmbar    - atraso pequeno
 CS_C_MISS    = "#f85149"   # vermelho - perdido
 CS_C_OK      = "#3fb950"   # verde    - chegou no prazo
 # slot que ainda não venceu: mesma cor do fundo dos cards, para "sumir" no grid
@@ -77,8 +82,9 @@ CLST_STATUS_COLORS = [ CS_C_DELAY_L,      # CI_ST_DL
                        CS_C_MAINT ]       # CI_ST_MAINT
 
 # rótulo de cada status, indexado pelo código
-CLST_STATUS_LABELS = [ "Atraso grave (>20 min)",    # CI_ST_DL
-                       "Atraso leve (9–20 min)",    # CI_ST_DS
+# (os atrasos não citam minutos: os limiares dependem do alcance)
+CLST_STATUS_LABELS = [ "Atraso grave",              # CI_ST_DL
+                       "Atraso leve",               # CI_ST_DS
                        "Aguardando",                # CI_ST_FUTURE
                        "Perdido",                   # CI_ST_MISS
                        "No prazo",                  # CI_ST_OK
@@ -97,10 +103,18 @@ CI_DEFAULT_WINDOW_HOURS = 24
 
 # limiares de atraso (chegada no servidor - horário do NOME do arquivo, em segundos) --
 # (não o início do slot: ver rsmStatus.classify_slot)
+# até o 1º limite (inclusive): no prazo -- atraso negativo (relógio do radar
+# adiantado) também; até o 2º (inclusive): atraso pequeno; acima: atraso grande
 
-# até 9 min (inclusive): no prazo -- atraso negativo (relógio do radar adiantado) também
+# por alcance (a parte "{alcance}" da estação): {alcance: (no prazo, atraso pequeno)}.
+# O nome do arquivo traz o INÍCIO da varredura, então o atraso normal inclui a
+# duração dela: no 250 km, 5-8 min (mediana 348 s, p99 503 s em 2026-11); no
+# 400 km, ~1 min (mediana 65 s, p99 86 s).  Os limites acompanham esse normal.
+CDCT_DELAY_LIMITS_BY_RANGE = { "250": (10 * 60, 20 * 60),
+                               "400": ( 3 * 60, 10 * 60) }
+
+# alcance fora da tabela acima (estação nova): limites padrão
 CI_ON_TIME_MAX_SECONDS = 9 * 60
-# acima de 9 até 20 min (inclusive): atraso pequeno; acima disso: atraso grande
 CI_SMALL_DELAY_MAX_SECONDS = 20 * 60
 
 # atraso da fonte (21.mvol) ------------------------------------------------------------

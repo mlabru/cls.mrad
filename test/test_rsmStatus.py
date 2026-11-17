@@ -6,6 +6,7 @@ Copyright (c) 1995-2026, Instituto de Controle do Espaço Aéreo
 test_rsmStatus
 testes unitários de rsmStatus
 
+2026.nov  mlabru  limiares por alcance (250, 400 e padrão)
 2026.nov  mlabru  estação em manutenção
 2026.nov  mlabru  status "sem fonte": banco vazio, mvol parado, mvol em dia
 2026.nov  mlabru  robustez: chegada mais cedo em slot duplicado; aviso de
@@ -67,9 +68,9 @@ def test_classify_slot_missing_when_key_absent():
     assert lt_ts == CDT_BASE.timestamp()
 
 
-def test_classify_slot_on_time_within_9_minutes():
+def test_classify_slot_returns_arrival_timestamp():
     """
-    chegada até 9 min após o horário do arquivo é considerada no prazo
+    slot recebido: o timestamp devolvido é o da chegada
     """
     ldct_received, ldt_arrival = _received(5)
 
@@ -91,48 +92,28 @@ def test_classify_slot_delay_counts_from_file_time_not_slot_start():
     assert li_status == cfg.CI_ST_OK
 
 
-def test_classify_slot_boundary_9_minutes_is_still_on_time():
+@pytest.mark.parametrize("fs_range, ff_delay_minutes, fi_expected", [
+    # 250 km: no prazo até 10 min, atraso pequeno até 20 (limites inclusive)
+    ("250", 9,  cfg.CI_ST_OK), ("250", 10, cfg.CI_ST_OK), ("250", 11, cfg.CI_ST_DS),
+    ("250", 20, cfg.CI_ST_DS), ("250", 21, cfg.CI_ST_DL),
+    # 400 km: no prazo até 3 min, atraso pequeno até 10
+    ("400", 3,  cfg.CI_ST_OK), ("400", 4,  cfg.CI_ST_DS), ("400", 10, cfg.CI_ST_DS),
+    ("400", 11, cfg.CI_ST_DL),
+    # alcance fora da tabela (estação nova): padrão 9/20
+    ("300", 9,  cfg.CI_ST_OK), ("300", 10, cfg.CI_ST_DS), ("300", 20, cfg.CI_ST_DS),
+    ("300", 21, cfg.CI_ST_DL),
+])
+def test_classify_slot_limits_depend_on_range(fs_range, ff_delay_minutes, fi_expected):
     """
-    exatamente 9 min de atraso ainda conta como no prazo (limite inclusive)
+    os limiares de atraso dependem do alcance da estação (decisão de 2026-11-17)
     """
-    ldct_received, _ = _received(9)
+    ls_station = f"Cangucu-{fs_range}"
+    ldt_arrival = CDT_FILE_TIME + datetime.timedelta(minutes=ff_delay_minutes)
+    ldct_received = {(ls_station, CDT_BASE): (CDT_FILE_TIME, ldt_arrival)}
 
-    _, li_status = rs.classify_slot(ldct_received, "Cangucu-250", CDT_BASE)
+    _, li_status = rs.classify_slot(ldct_received, ls_station, CDT_BASE)
 
-    assert li_status == cfg.CI_ST_OK
-
-
-def test_classify_slot_small_delay_between_9_and_20_minutes():
-    """
-    atraso entre 9 e 20 min é classificado como atraso pequeno (DS)
-    """
-    ldct_received, _ = _received(15)
-
-    _, li_status = rs.classify_slot(ldct_received, "Cangucu-250", CDT_BASE)
-
-    assert li_status == cfg.CI_ST_DS
-
-
-def test_classify_slot_boundary_20_minutes_is_still_small_delay():
-    """
-    exatamente 20 min de atraso ainda conta como atraso pequeno (limite inclusive)
-    """
-    ldct_received, _ = _received(20)
-
-    _, li_status = rs.classify_slot(ldct_received, "Cangucu-250", CDT_BASE)
-
-    assert li_status == cfg.CI_ST_DS
-
-
-def test_classify_slot_large_delay_over_20_minutes():
-    """
-    atraso acima de 20 min é classificado como atraso grande (DL)
-    """
-    ldct_received, _ = _received(25)
-
-    _, li_status = rs.classify_slot(ldct_received, "Cangucu-250", CDT_BASE)
-
-    assert li_status == cfg.CI_ST_DL
+    assert li_status == fi_expected
 
 
 @pytest.mark.parametrize("ff_delay_minutes", [-1, -9, -15])

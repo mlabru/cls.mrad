@@ -23,6 +23,9 @@ saída:
 tudo é UTC, com fuso explícito: o mtime do banco é um epoch (não tem fuso) e
 o horário no nome do arquivo é UTC.  Não depende do fuso da máquina.
 
+2026.nov  mlabru  limiares de atraso por alcance (_delay_limits,
+                  cfg.CDCT_DELAY_LIMITS_BY_RANGE): 250 km = 10/20 min,
+                  400 km = 3/10 min; outro alcance, o padrão 9/20
 2026.nov  mlabru  estação em manutenção (cfg.CLST_STATIONS_MAINTENANCE): slot
                   sem arquivo sai CI_ST_MAINT, não MISS/FUTURE/NOSRC
 2026.nov  mlabru  status "sem fonte" (CI_ST_NOSRC): slot sem observação só é
@@ -111,6 +114,22 @@ def arg_parse(flst_argv: list | None = None) -> argparse.Namespace:
     return l_parser.parse_args(flst_argv)
 
 # ─────────────────────────────────────────────────────────────────────────────────────
+def _delay_limits(fs_station: str) -> tuple[int, int]:
+    """
+    devolve os limiares de atraso da estação, conforme o seu alcance.
+
+    ex.: "Cangucu-250" -> cfg.CDCT_DELAY_LIMITS_BY_RANGE["250"]; um alcance fora
+    da tabela (estação nova) usa os limites padrão.
+
+    :param fs_station: estação, no formato "{sítio}-{alcance}"
+    :returns: (máximo no prazo, máximo atraso pequeno), em segundos
+    """
+    ls_range = fs_station.rsplit("-", 1)[-1]
+    lt_default = (cfg.CI_ON_TIME_MAX_SECONDS, cfg.CI_SMALL_DELAY_MAX_SECONDS)
+
+    return cfg.CDCT_DELAY_LIMITS_BY_RANGE.get(ls_range, lt_default)
+
+# ─────────────────────────────────────────────────────────────────────────────────────
 def classify_slot(fdct_observations: dict, fs_station: str,
                   fdt_slot: datetime.datetime) -> tuple[float, int]:
     """
@@ -118,13 +137,14 @@ def classify_slot(fdct_observations: dict, fs_station: str,
 
     regras (atraso = chegada no servidor - horário gravado no nome do arquivo;
     NÃO o início do slot: um arquivo das 12:08 que chega às 12:10 atrasou
-    2 min, não 10):
+    2 min, não 10).  Os limites dependem do alcance (_delay_limits; 250 km:
+    10/20 min, 400 km: 3/10 min, outro: 9/20 min):
     - arquivo não recebido        -> MISS
-    - até 9 min (inclusive)       -> OK, inclusive atraso negativo (o relógio
+    - até o 1º limite (inclusive) -> OK, inclusive atraso negativo (o relógio
                                      do radar está adiantado em relação ao do
                                      servidor, mas o arquivo chegou)
-    - até 20 min (inclusive)      -> DS (atraso pequeno)
-    - acima de 20 min             -> DL (atraso grande)
+    - até o 2º limite (inclusive) -> DS (atraso pequeno)
+    - acima do 2º limite          -> DL (atraso grande)
 
     :param fdct_observations: {(estação, slot): (horário_do_arquivo, horário_chegada)}, UTC
     :param fs_station: estação, no formato "{sítio}-{alcance}"
@@ -139,10 +159,11 @@ def classify_slot(fdct_observations: dict, fs_station: str,
 
     ldt_file_time, ldt_arrival = fdct_observations[lt_key]
     lf_delay_seconds = (ldt_arrival - ldt_file_time).total_seconds()
+    li_on_time_max, li_small_delay_max = _delay_limits(fs_station)
 
-    if lf_delay_seconds <= cfg.CI_ON_TIME_MAX_SECONDS:
+    if lf_delay_seconds <= li_on_time_max:
         li_status = cfg.CI_ST_OK
-    elif lf_delay_seconds <= cfg.CI_SMALL_DELAY_MAX_SECONDS:
+    elif lf_delay_seconds <= li_small_delay_max:
         li_status = cfg.CI_ST_DS
     else:
         li_status = cfg.CI_ST_DL

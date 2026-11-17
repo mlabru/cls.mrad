@@ -6,6 +6,7 @@ Copyright (c) 1995-2026, Instituto de Controle do Espaço Aéreo
 test_rsm_config
 testes unitários de rsm_config
 
+2026.nov  mlabru  limiares por alcance ordenados
 2026.nov  mlabru  código CI_ST_MAINT; manutenção só de estação conhecida
 2026.nov  mlabru  código CI_ST_NOSRC (sem fonte)
 2026.out  mlabru  work.rsm_config; limiares nomeados
@@ -82,6 +83,9 @@ def test_delay_thresholds_are_ordered():
     o limite de "no prazo" vem antes do limite de "atraso pequeno"
     """
     assert 0 < cfg.CI_ON_TIME_MAX_SECONDS < cfg.CI_SMALL_DELAY_MAX_SECONDS
+
+    for li_on_time, li_small_delay in cfg.CDCT_DELAY_LIMITS_BY_RANGE.values():
+        assert 0 < li_on_time < li_small_delay
 
 
 def test_slots_per_hour_matches_slot_size():
