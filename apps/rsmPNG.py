@@ -10,6 +10,7 @@ produzido por rsmStatus.py.
 uso:
     python rsmPNG.py [-i STATUS.json] [-o SAIDA.png] [-w HORAS]
 
+2026.nov  mlabru  stations_from_document vem do work.rsm_stats
 2026.nov  mlabru  eixo em UTC pelo próprio JSON (fg.reference_time; antes a
                   hora local do momento do desenho, 3h atrás das células) e
                   "gerado em" no título; PNG gravado de forma atômica
@@ -36,6 +37,7 @@ import time
 import work.rsm_config as cfg
 import work.rsm_figure as fg
 import work.rsm_files as fil
+import work.rsm_stats as rst
 
 # < constants >────────────────────────────────────────────────────────────────────────
 
@@ -74,7 +76,7 @@ def load_status_json(fs_json_path: str) -> dict:
     lê o JSON de status gerado por rsmStatus.py.
 
     :param fs_json_path: caminho do JSON
-    :returns: documento de status (ver rsm_figure.stations_from_document)
+    :returns: documento de status (ver rsm_stats.stations_from_document)
     """
     with open(fs_json_path, "r", encoding="utf-8") as l_file:
         return json.load(l_file)
@@ -96,7 +98,7 @@ def main(flst_argv: list | None = None) -> int:
     l_args = arg_parse(flst_argv)
 
     ldct_document = load_status_json(l_args.inp)
-    ldct_status = fg.stations_from_document(ldct_document)
+    ldct_status = rst.stations_from_document(ldct_document)
 
     if not ldct_status:
         M_LOG.error("JSON de status vazio: %s", l_args.inp)

@@ -6,6 +6,8 @@ Copyright (c) 1995-2026, Instituto de Controle do Espaço Aéreo
 test_rsmStatus
 testes unitários de rsmStatus
 
+2026.nov  mlabru  carência pela constante (40 min); classify_period sem a
+                  lista de manutenção (relatório)
 2026.nov  mlabru  aviso de relógio do radar adiantado
 2026.nov  mlabru  limiares por alcance (250, 400 e padrão)
 2026.nov  mlabru  estação em manutenção
@@ -240,19 +242,22 @@ def test_build_station_status_empty_dbase_is_all_no_source(make_dbase):
 
 def test_build_station_status_fresh_source_is_miss_except_grace_period(make_dbase):
     """
-    mvol em dia (registrou agora): todo slot sem arquivo é MISS, menos os dos
-    últimos 20 min (carência do sync do mvol), que saem FUTURE ("Aguardando")
-    -- o comportamento de antes do status "sem fonte"
+    mvol em dia (registrou agora): todo slot sem arquivo é MISS, menos os que
+    começaram há menos de CI_PENDING_GRACE_MINUTES (carência do registro do
+    mvol), que saem FUTURE ("Aguardando")
     """
     lpth = make_dbase([("Outro/250/x.mvol", 1.0)], fs_created_at=_iso_minutes_ago(0))
     ldct_out = rs.build_station_status(str(lpth), 10)
+
+    # a última coluna é o slot ANTERIOR ao atual, então ficam de carência
+    # carência/slot - 1 colunas, ou uma a mais, conforme o minuto atual
+    li_grace_columns = cfg.CI_PENDING_GRACE_MINUTES // cfg.CI_SLOT_MINUTES - 1
 
     for ls_station in cfg.CLST_STATIONS:
         llst_status = _statuses(ldct_out, ls_station)
 
         li_grace_slots = llst_status.count(cfg.CI_ST_FUTURE)
-        # slots que COMEÇARAM há menos de 20 min: 1 ou 2, conforme o minuto atual
-        assert 1 <= li_grace_slots <= 2
+        assert li_grace_columns <= li_grace_slots <= li_grace_columns + 1
         assert llst_status[-li_grace_slots:] == [cfg.CI_ST_FUTURE] * li_grace_slots
         assert set(llst_status[:-li_grace_slots]) == {cfg.CI_ST_MISS}
 
@@ -315,6 +320,29 @@ def test_build_station_status_maintenance_station_is_never_miss(make_dbase, monk
     assert set(llst_maint[1:]) == {cfg.CI_ST_MAINT}
     assert cfg.CI_ST_MAINT not in _statuses(ldct_out, ls_other)
     assert cfg.CI_ST_MISS in _statuses(ldct_out, ls_other)
+
+
+def test_classify_period_can_ignore_maintenance(make_dbase, monkeypatch):
+    """
+    fb_use_maintenance=False (relatório de um período passado): a estação da
+    lista de manutenção é julgada como as outras
+    """
+    ls_station = cfg.CLST_STATIONS[0]
+    monkeypatch.setattr(cfg, "CLST_STATIONS_MAINTENANCE", frozenset((ls_station,)))
+    # uma linha qualquer, só para o mvol ter registrado algo agora (fonte em dia)
+    lpth = make_dbase([("Outro/250/x.mvol", 1.0)], fs_created_at=_iso_minutes_ago(0))
+    ldt_now = datetime.datetime.now(datetime.timezone.utc)
+    ldt_start = datetime.datetime(2026, 10, 5, tzinfo=datetime.timezone.utc)
+    ldt_end = ldt_start + datetime.timedelta(hours=1)
+
+    ldct_with, llst_slots, _ = rs.classify_period(str(lpth), ldt_start, ldt_end, ldt_now)
+    ldct_without, _, _ = rs.classify_period(str(lpth), ldt_start, ldt_end, ldt_now,
+                                            fb_use_maintenance=False)
+
+    assert llst_slots[0] == ldt_start and len(llst_slots) == cfg.CI_SLOTS_PER_HOUR
+    assert {li for _, li in ldct_with[ls_station]} == {cfg.CI_ST_MAINT}
+    assert {li for _, li in ldct_without[ls_station]} == {cfg.CI_ST_MISS}
+
 
 
 @pytest.mark.parametrize("fs_source", ["fresh", "stopped", "empty"])

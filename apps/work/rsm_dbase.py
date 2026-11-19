@@ -13,6 +13,7 @@ não cria o banco, não cria tabela, não grava e não apaga nada.  A
 interpretação de cada linha (sítio, alcance, slot esperado, offset UTC) é
 feita por quem lê (rsmStatus._parse_observation).
 
+2026.nov  mlabru  fetch_first_file_time (início do histórico, para o rsmReport.py)
 2026.nov  mlabru  imports cls_common.* (pacote do repo cls.common, via
                   CLS_PYLIB; antes symlinks de diretório)
 2026.nov  mlabru  fetch_observations filtra pela coluna timestamp (horário
@@ -130,5 +131,31 @@ def fetch_last_update(fconn: sqlite3.Connection) -> datetime.datetime | None:
         ldt_last_update = ldt_last_update.replace(tzinfo=datetime.timezone.utc)
 
     return ldt_last_update
+
+# ─────────────────────────────────────────────────────────────────────────────────────
+def fetch_first_file_time(fconn: sqlite3.Connection) -> datetime.datetime | None:
+    """
+    devolve o horário de arquivo (coluna timestamp) mais antigo do banco.
+
+    é o início do histórico: antes dele o banco não sabe nada, e um slot sem
+    arquivo ali não é "perdido".  Usa o índice do timestamp (min é imediato).
+
+    :param fconn: conexão aberta por connect()
+    :returns: instante UTC (com fuso), ou None se a tabela não existe ou não
+              tem nenhum timestamp
+    """
+    ls_query = f"SELECT min(timestamp) FROM {ct.CS_TABLE}"
+
+    try:
+        lf_first = fconn.execute(ls_query).fetchone()[0]
+
+    except sqlite3.OperationalError as l_err:
+        M_LOG.warning("início do histórico indisponível no catalog.db: %s", l_err)
+        return None
+
+    if lf_first is None:
+        return None
+
+    return datetime.datetime.fromtimestamp(float(lf_first), tz=datetime.timezone.utc)
 
 # < the end >──────────────────────────────────────────────────────────────────────────

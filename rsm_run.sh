@@ -18,6 +18,9 @@
 # lock de instância (flock no fd 200): se o cron disparar de novo antes do
 # fim da rodada anterior, a nova sai sem fazer nada (rc 0).
 #
+# 2026.nov  mlabru  - heartbeat RSM_RUN_OK_FILE (cls_heartbeat) no fim de toda
+#                     execução bem sucedida, para o rsm_check.sh
+#
 # 2026.out  mlabru  - python3 do RSM_VENV (rsm_activate_venv), como o
 #                     25.oflow e o 27.nowcast
 #                   - banco como única fonte: saiu fetch_remote_listing (ssh
@@ -137,6 +140,9 @@ main()
     # desenha o PNG (rsmPNG.py -> RSM_PNG_FILE)
     run_python_step rsmPNG -w "${RSM_WINDOW_HOURS}" -i "${RSM_STATUS_JSON}" \
                            -o "${RSM_PNG_FILE}" || exit 1
+
+    # último sucesso, para o alarme externo (rsm_check.sh)
+    cls_heartbeat "${RSM_RUN_OK_FILE}"
 
     # logger
     log "[info]: Radar Station Monitor finalizado."

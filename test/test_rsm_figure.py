@@ -6,6 +6,8 @@ Copyright (c) 1995-2026, Instituto de Controle do Espaço Aéreo
 test_rsm_figure
 testes unitários de rsm_figure
 
+2026.nov  mlabru  testes de _station_order e stations_from_document foram
+                  para test_rsm_stats.py (as funções saíram daqui)
 2026.nov  mlabru  MAINT fora das estatísticas; legenda opcional (NOSRC/MAINT)
 2026.nov  mlabru  NOSRC (sem fonte) fora das estatísticas e na legenda
 2026.nov  mlabru  reference_time/generated_time; eixo e título em UTC
@@ -184,22 +186,6 @@ def test_build_figure_returns_figure_with_three_axes():
     l_fig.clear()
 
 
-def test_station_order_appends_unknown_stations_sorted_after_known():
-    """
-    _station_order mantém a ordem curada das estações conhecidas
-    (cfg.CLST_STATIONS) primeiro, e acrescenta estações desconhecidas
-    (ex.: descobertas dinamicamente) em ordem alfabética no final
-    """
-    ldct_data = _make_data([cfg.CI_ST_OK])
-    ldct_data["Zulu-999"] = [(None, cfg.CI_ST_OK)]
-    ldct_data["Alfa-111"] = [(None, cfg.CI_ST_OK)]
-
-    llst_order = fig_mod._station_order(ldct_data)
-
-    assert llst_order[:len(cfg.CLST_STATIONS)] == list(cfg.CLST_STATIONS)
-    assert llst_order[len(cfg.CLST_STATIONS):] == ["Alfa-111", "Zulu-999"]
-
-
 def test_build_figure_handles_unknown_station_without_error():
     """
     uma estação fora de cfg.CLST_STATIONS em "data" não deve quebrar a
@@ -277,17 +263,6 @@ def test_rate_color_thresholds():
 
 # instante "agora" usado nos testes de source_alert
 CDT_NOW_UTC = datetime.datetime(2026, 10, 7, 12, 0, tzinfo=datetime.timezone.utc)
-
-
-def test_stations_from_document_new_and_old_format():
-    """
-    formato novo: devolve "stations"; formato antigo: o próprio dicionário
-    """
-    ldct_stations = {"A-250": [(0, cfg.CI_ST_OK)]}
-
-    assert fig_mod.stations_from_document({"source_last_update": None,
-                                           "stations": ldct_stations}) == ldct_stations
-    assert fig_mod.stations_from_document(ldct_stations) == ldct_stations
 
 
 def test_source_alert_fresh_source_has_no_alert():

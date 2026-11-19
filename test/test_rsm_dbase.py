@@ -6,6 +6,7 @@ Copyright (c) 1995-2026, Instituto de Controle do Espaço Aéreo
 test_rsm_dbase
 testes unitários de rsm_dbase (leitura SOMENTE LEITURA do catalog.db)
 
+2026.nov  mlabru  fetch_first_file_time (início do histórico)
 2026.nov  mlabru  fetch_observations filtra por timestamp (nome do arquivo)
 2026.out  mlabru  banco como única fonte: fetch_last_update; os testes de
                   build_station_status foram para test_rsmStatus.py
@@ -144,6 +145,38 @@ def test_fetch_last_update_sem_tabela(tmp_path):
 
     lconn = rsm_dbase.connect(str(lpth))
     assert rsm_dbase.fetch_last_update(lconn) is None
+    lconn.close()
+
+# < fetch_first_file_time >───────────────────────────────────────────────────────────
+
+def test_fetch_first_file_time_devolve_o_menor_timestamp(make_dbase):
+    """
+    o início do histórico é o min(timestamp) (horário do nome), em UTC com fuso;
+    linhas sem timestamp (nome fora do padrão) não contam
+    """
+    lpth = make_dbase([("A/250/STI-250--2026-10-07--12-03-00.mvol", 1.0),
+                       ("A/250/STI-250--2026-10-05--08-13-20.mvol", 1.0),
+                       ("A/250/fora_do_padrao.mvol", 1.0)])
+
+    lconn = rsm_dbase.connect(str(lpth))
+    ldt = rsm_dbase.fetch_first_file_time(lconn)
+    lconn.close()
+
+    assert ldt == datetime.datetime(2026, 10, 5, 8, 13, 20, tzinfo=datetime.timezone.utc)
+
+
+def test_fetch_first_file_time_sem_timestamp_ou_sem_tabela(make_dbase, tmp_path):
+    lpth = make_dbase([("A/250/fora_do_padrao.mvol", 1.0)])
+
+    lconn = rsm_dbase.connect(str(lpth))
+    assert rsm_dbase.fetch_first_file_time(lconn) is None
+    lconn.close()
+
+    lpth_empty = tmp_path / "vazio.db"
+    sqlite3.connect(str(lpth_empty)).close()
+
+    lconn = rsm_dbase.connect(str(lpth_empty))
+    assert rsm_dbase.fetch_first_file_time(lconn) is None
     lconn.close()
 
 # < the end >──────────────────────────────────────────────────────────────────────────

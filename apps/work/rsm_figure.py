@@ -11,8 +11,8 @@ entrada: o documento de status gerado por rsmStatus.py
     { "generated_at": "<ISO UTC>", "last_slot": "<ISO UTC>",
       "source_last_update": "<ISO UTC>" | null,
       "stations": { "Belem-250": [(timestamp, código_status), ...], ... } }
-    (stations_from_document, reference_time, generated_time e source_alert
-    extraem as partes)
+    (rsm_stats.stations_from_document, reference_time, generated_time e
+    source_alert extraem as partes)
 saída: uma matplotlib Figure com três painéis empilhados:
     1. grade estações x slots (cada célula pintada pela cor do status);
     2. barras empilhadas com o % de cada status por estação;
@@ -20,6 +20,8 @@ saída: uma matplotlib Figure com três painéis empilhados:
 
 não faz I/O nem abre janela -- por isso é testável sem display.
 
+2026.nov  mlabru  contas e leitura do JSON no work.rsm_stats (sem matplotlib,
+                  para o alarme e o relatório usarem a mesma regra)
 2026.nov  mlabru  status "manutenção" (MAINT) fora das estatísticas; legenda
                   só mostra NOSRC/MAINT quando aparecem na grade
 2026.nov  mlabru  status "sem fonte" (NOSRC): fora das estatísticas, como o
@@ -65,6 +67,7 @@ from matplotlib.figure import Figure
 
 # locals
 import work.rsm_config as cfg
+import work.rsm_stats as rst
 
 # < constants >────────────────────────────────────────────────────────────────────────
 
@@ -93,49 +96,10 @@ CLST_LEGEND_STATUSES = [cfg.CI_ST_OK, cfg.CI_ST_DS, cfg.CI_ST_DL, cfg.CI_ST_MISS
 # legenda fica curta e não cobre a grade no dia a dia)
 CLST_LEGEND_OPTIONAL_STATUSES = [cfg.CI_ST_NOSRC, cfg.CI_ST_MAINT]
 
-# status que não julgam o radar e por isso ficam fora de toda estatística:
-# FUTURE (slot ainda não venceu), NOSRC (o 21.mvol parou antes de registrá-lo)
-# e MAINT (estação em manutenção)
-CSET_UNJUDGED_STATUSES = frozenset((cfg.CI_ST_FUTURE, cfg.CI_ST_NOSRC, cfg.CI_ST_MAINT))
-
 # < logging >──────────────────────────────────────────────────────────────────────────
 
 M_LOG = logging.getLogger(__name__)
 M_LOG.setLevel(logging.INFO)
-
-# ─────────────────────────────────────────────────────────────────────────────────────
-def stations_from_document(fdct_document: dict) -> dict:
-    """
-    extrai o status por estação do documento gravado por rsmStatus.py.
-
-    aceita também o formato antigo (o próprio dicionário de estações, sem a
-    chave "stations"), para o rsmPNG não quebrar com um JSON gravado antes da
-    atualização -- o rsm_run.sh o regrava no ciclo seguinte.
-
-    :param fdct_document: conteúdo do JSON de status
-    :returns: {estação: [(timestamp, código_status), ...]}
-    """
-    if "stations" not in fdct_document:
-        return fdct_document
-
-    return fdct_document["stations"]
-
-# ─────────────────────────────────────────────────────────────────────────────────────
-def _document_time(fdct_document: dict, fs_key: str) -> datetime.datetime | None:
-    """
-    lê um instante ISO UTC do documento de status.
-
-    :param fdct_document: conteúdo do JSON de status
-    :param fs_key: chave do instante ("last_slot", "generated_at")
-    :returns: o instante (com fuso), ou None se a chave falta ou está vazia
-              (JSON de formato antigo)
-    """
-    ls_value = fdct_document.get(fs_key)
-
-    if ls_value is None:
-        return None
-
-    return datetime.datetime.fromisoformat(ls_value)
 
 # ─────────────────────────────────────────────────────────────────────────────────────
 def reference_time(fdct_document: dict,
@@ -153,7 +117,7 @@ def reference_time(fdct_document: dict,
                         que não traz last_slot
     :returns: início do slot da última coluna, UTC
     """
-    ldt_last_slot = _document_time(fdct_document, "last_slot")
+    ldt_last_slot = rst.document_time(fdct_document, "last_slot")
 
     if ldt_last_slot is None:
         return fdt_now_utc
@@ -168,7 +132,7 @@ def generated_time(fdct_document: dict) -> datetime.datetime | None:
     :param fdct_document: conteúdo do JSON de status
     :returns: instante UTC, ou None (JSON de formato antigo)
     """
-    return _document_time(fdct_document, "generated_at")
+    return rst.document_time(fdct_document, "generated_at")
 
 # ─────────────────────────────────────────────────────────────────────────────────────
 def source_alert(fdct_document: dict, fdt_now_utc: datetime.datetime) -> str | None:
@@ -188,15 +152,13 @@ def source_alert(fdct_document: dict, fdt_now_utc: datetime.datetime) -> str | N
     if "source_last_update" not in fdct_document:
         return None
 
-    ls_last_update = fdct_document["source_last_update"]
+    ldt_last_update = rst.document_time(fdct_document, "source_last_update")
 
-    if ls_last_update is None:
+    if ldt_last_update is None:
         return "⚠  catalog.db sem nenhuma observação registrada pelo 21.mvol"
 
-    ldt_last_update = datetime.datetime.fromisoformat(ls_last_update)
-    ldt_stale_limit = fdt_now_utc - datetime.timedelta(minutes=cfg.CI_SOURCE_STALE_MINUTES)
-
-    if ldt_last_update >= ldt_stale_limit:
+    # a regra de "parada" é a mesma do alarme (rsmCheck.py)
+    if not rst.is_source_stale(ldt_last_update, fdt_now_utc):
         return None
 
     return (f"⚠  catalog.db sem observações novas desde "
@@ -241,47 +203,6 @@ def cap_window(fdct_data: dict, fi_window_hours: int) -> tuple[dict, int, int]:
     return ldct_capped, li_total_slots, li_window_hours
 
 # ─────────────────────────────────────────────────────────────────────────────────────
-def _station_order(fdct_data: dict) -> list:
-    """
-    define a ordem das linhas (grid) e colunas (barras) das estações.
-
-    primeiro as estações conhecidas, na ordem de cfg.CLST_STATIONS; depois
-    qualquer outra presente nos dados (ex.: estação nova, descoberta pelo
-    rsmStatus.py), em ordem alfabética.
-
-    :param fdct_data: status por estação
-    :returns: lista com os nomes das estações, na ordem de exibição
-    """
-    llst_known = [ls_station for ls_station in cfg.CLST_STATIONS
-                  if ls_station in fdct_data]
-
-    llst_new = sorted(ls_station for ls_station in fdct_data
-                      if ls_station not in cfg.CLST_STATIONS)
-
-    return llst_known + llst_new
-
-# ─────────────────────────────────────────────────────────────────────────────────────
-def _count_statuses(flst_slots: list) -> collections.defaultdict:
-    """
-    conta quantos slots há de cada status, ignorando FUTURE, NOSRC e MAINT.
-
-    FUTURE (slot que ainda não venceu), NOSRC (sem fonte: o mvol parou) e
-    MAINT (estação em manutenção) não são sucesso nem falha do radar, por isso
-    não entram em nenhuma estatística (CSET_UNJUDGED_STATUSES).
-
-    :param flst_slots: lista de (timestamp, código_status)
-    :returns: dicionário {código_status: quantidade} (0 para códigos ausentes)
-    """
-    ldct_counts = collections.defaultdict(int)
-
-    for _, li_status in flst_slots:
-        if li_status in CSET_UNJUDGED_STATUSES:
-            continue
-        ldct_counts[li_status] += 1
-
-    return ldct_counts
-
-# ─────────────────────────────────────────────────────────────────────────────────────
 def _nonzero_total(fdct_counts: dict) -> int:
     """
     soma as contagens de status, para servir de divisor nos percentuais.
@@ -289,7 +210,7 @@ def _nonzero_total(fdct_counts: dict) -> int:
     se só havia slots fora das estatísticas a soma seria 0; devolve 1 nesse caso, para
     evitar divisão por zero (todos os percentuais saem 0%).
 
-    :param fdct_counts: {código_status: quantidade}, como em _count_statuses
+    :param fdct_counts: {código_status: quantidade}, como em rst.count_statuses
     :returns: a soma das quantidades, ou 1 se a soma for 0
     """
     li_total = sum(fdct_counts.values())
@@ -312,7 +233,7 @@ def aggregate_stats(fdct_data: dict) -> tuple[int, int, int, int, float]:
     ldct_counts = collections.defaultdict(int)
 
     for llst_slots in fdct_data.values():
-        for li_status, li_count in _count_statuses(llst_slots).items():
+        for li_status, li_count in rst.count_statuses(llst_slots).items():
             ldct_counts[li_status] += li_count
 
     li_total = _nonzero_total(ldct_counts)
@@ -448,13 +369,13 @@ def _draw_status_grid(fax: Axes, fdct_data: dict, flst_stations: list,
 # ─────────────────────────────────────────────────────────────────────────────────────
 def _station_percentages(flst_slots: list) -> dict:
     """
-    calcula o % de cada status de UMA estação (CSET_UNJUDGED_STATUSES ignorados).
+    calcula o % de cada status de UMA estação (rst.CSET_UNJUDGED_STATUSES ignorados).
 
     :param flst_slots: lista de (timestamp, código_status) da estação
     :returns: {código_status: percentual 0..100} para cada status de
               CLST_BAR_STATUSES (0 para os ausentes)
     """
-    ldct_counts = _count_statuses(flst_slots)
+    ldct_counts = rst.count_statuses(flst_slots)
     li_station_total = _nonzero_total(ldct_counts)
 
     ldct_percentages = {}
@@ -611,7 +532,7 @@ def build_figure(fdct_data: dict, fdt_ref_time: datetime.datetime,
     :param fdt_generated_at: quando o JSON foi gerado (ver generated_time), ou None
     :returns: a Figure pronta (salvar com savefig)
     """
-    llst_stations = _station_order(fdct_data)
+    llst_stations = rst.station_order(fdct_data)
 
     l_figure = Figure(figsize=CT_FIGURE_SIZE, facecolor=cfg.CS_BG_DARK)
 

@@ -7,6 +7,7 @@ test_rsm_run_sh
 testes do rsm_run.sh carregado com RSM_RUN_NO_MAIN=true (só as funções, sem
 rodar o main), no padrão de test_ofl_run.py / test_vol_register.py
 
+2026.nov  mlabru  heartbeat (cls_heartbeat) só depois dos dois programas
 2026.out  mlabru  rsm_activate_venv (RSM_VENV, o ~/.venv do oflow/nowcast)
 2026.out  mlabru  banco como única fonte: sem fetch_remote_listing
 2026.out  mlabru  initial version (Linux/Python)
@@ -129,5 +130,23 @@ def test_main_ativa_o_venv_antes_dos_programas():
     ls_text = (MPTH_ROOT / "rsm_run.sh").read_text(encoding="utf-8")
 
     assert ls_text.index("    rsm_activate_venv") < ls_text.index("    run_python_step rsmStatus")
+
+def test_main_grava_heartbeat_so_depois_dos_programas():
+    """
+    o heartbeat diz "o rsm_run.sh terminou bem": vem depois do rsmPNG (que sai
+    do main com exit 1 se falhar), nunca antes
+    """
+    ls_text = (MPTH_ROOT / "rsm_run.sh").read_text(encoding="utf-8")
+
+    assert ls_text.index("    run_python_step rsmPNG") < \
+           ls_text.index('    cls_heartbeat "${RSM_RUN_OK_FILE}"')
+
+
+def test_heartbeat_fica_no_estado_do_monrad(tmp_path):
+    lproc = _run_sourced(tmp_path, 'cls_heartbeat "${RSM_RUN_OK_FILE}"; cat "${RSM_RUN_OK_FILE}"')
+
+    assert 0 == lproc.returncode, lproc.stderr
+    assert (tmp_path / "mrad" / "data" / "state" / "rsm_run.ok").exists()
+    assert lproc.stdout.split()[0].isdigit()
 
 # < the end >──────────────────────────────────────────────────────────────────────────

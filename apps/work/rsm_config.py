@@ -10,6 +10,11 @@ limiares de atraso e a lista mínima de estações monitoradas.
 é o único lugar onde esses valores são definidos; rsmStatus.py, rsm_figure.py,
 rsmPNG.py e rsm_figure.py só os leem.
 
+2026.nov  mlabru  carência 20 -> 40 min (CI_PENDING_GRACE_MINUTES): no banco
+                  real o mvol registra o arquivo ~30 min após o início do
+                  slot, e 20 min pintava uma coluna inteira de MISS falso a
+                  cada rodada; limiares do alarme externo (CI_ALERT_*,
+                  CI_CHECK_MAX_AGE_MINUTES, para o rsmCheck.py)
 2026.nov  mlabru  aviso de relógio do radar adiantado (CI_CLOCK_AHEAD_*)
 2026.nov  mlabru  limiares de atraso por alcance (CDCT_DELAY_LIMITS_BY_RANGE:
                   250 km = 10/20 min, 400 km = 3/10 min; decisão do
@@ -137,8 +142,13 @@ CI_CLOCK_AHEAD_MIN_FILES = 6
 # tempo, contado do início do slot, que o mvol leva para registrar o arquivo.
 # Slot sem observação só vira "perdido" (MISS) se o mvol registrou algo DEPOIS
 # disso (max(created_at) >= início + carência); antes, é "Aguardando" (FUTURE)
-# ou, com a fonte parada, "Sem fonte" (NOSRC) -- ver rsmStatus._unseen_status
-CI_PENDING_GRACE_MINUTES = 20
+# ou, com a fonte parada, "Sem fonte" (NOSRC) -- ver rsmStatus._unseen_status.
+# Medido no catalog.db real (35.614 arquivos, 2026-09/10): início do slot ->
+# created_at tem mediana 30 min e p99 40 min, igual nos dois alcances (o
+# arquivo fica ~22 min entre o mtime e a listagem do vol_sync.sh).  Com 20 min,
+# cada rodada mostrava ~18 MISS falsos (uma coluna inteira, corrigida rodadas
+# depois); com 40, 0,3.  Se a cadência do mvol mudar, meça de novo
+CI_PENDING_GRACE_MINUTES = 40
 
 # sem NENHUMA observação nova no banco há mais que isto (3 ciclos do vol_sync),
 # a fonte é dada como parada: o painel avisa e os slots que o mvol não chegou a
@@ -153,6 +163,19 @@ CF_RATE_GOOD_PCT = 90
 CF_RATE_WARN_PCT = 75
 # % de slots perdidos acima do qual a barra da estação ganha um alerta "⚠"
 CF_MISSING_ALERT_PCT = 10
+
+# alarme externo (rsmCheck.py, chamado pelo rsm_check.sh) ------------------------------
+# saída no formato dos plugins do Nagios; status fora das estatísticas
+# (Aguardando, Sem fonte, Manutenção) nunca disparam alarme de estação
+
+# estação muda: os últimos N slots julgados são todos "perdido" -> CRITICAL
+# (6 = 1 h sem nenhum arquivo)
+CI_ALERT_SILENT_SLOTS = 6
+# perdas na janela acima de CF_MISSING_ALERT_PCT (o mesmo "⚠" da barra) -> WARNING
+
+# JSON de status gerado há mais que isto: o monrad parou -> CRITICAL (3 ciclos
+# do cron de 10 min; o rsm_check.sh passa o RSM_CHECK_MAX_AGE_MIN)
+CI_CHECK_MAX_AGE_MINUTES = 30
 
 # estações -----------------------------------------------------------------------------
 # lista MÍNIMA de estações, no formato "{sítio}-{alcance}".  Estas sempre

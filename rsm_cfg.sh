@@ -17,6 +17,9 @@
 # remoto nem acesso aos .mvol.
 #
 
+# 2026.nov  mlabru  alarme: RSM_RUN_OK_FILE (heartbeat do rsm_run.sh) e
+#                   RSM_CHECK_MAX_AGE_MIN, lidos pelo rsm_check.sh
+#
 # 2026.nov  mlabru  cls_setup_pythonpath: pacote Python comum (cls_common)
 #                   por CLS_PYLIB, no lugar dos symlinks apps/{dbase,radar,util}
 #
@@ -94,6 +97,14 @@ RSM_PNG_FILE="${RSM_OUTPUT}/rsm_out.png"
 
 # lock de instância (impede duas execuções simultâneas de rsm_run.sh)
 RSM_INSTANCE_LOCK="${RSM_STATE}/.rsm.lock"
+
+# heartbeat: último sucesso do rsm_run.sh (cls_heartbeat), conferido pelo
+# rsm_check.sh -- descobre um cron parado ou que só falha (PNG congelado)
+RSM_RUN_OK_FILE="${RSM_STATE}/rsm_run.ok"
+
+# idade máxima, em minutos, do heartbeat e do JSON de status antes do alarme
+# (rsm_check.sh); 30 = três rodadas perdidas de um cron */10
+RSM_CHECK_MAX_AGE_MIN="${RSM_CHECK_MAX_AGE_MIN:-30}"
 
 # logs
 RSM_LOG_APP="${RSM_LOGS}/rsm_monrad.log"

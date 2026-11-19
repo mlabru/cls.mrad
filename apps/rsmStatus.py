@@ -23,6 +23,9 @@ saída:
 tudo é UTC, com fuso explícito: o mtime do banco é um epoch (não tem fuso) e
 o horário no nome do arquivo é UTC.  Não depende do fuso da máquina.
 
+2026.nov  mlabru  núcleo classify_period(início, fim, agora), também usado
+                  pelo rsmReport.py (disponibilidade de um período); carência
+                  de 40 min (cfg.CI_PENDING_GRACE_MINUTES, medida no banco)
 2026.nov  mlabru  aviso no log de relógio do radar adiantado
                   (_warn_clock_ahead): mediana do atraso negativa esconde o
                   atraso real, já que chegada antecipada conta como no prazo
@@ -175,7 +178,7 @@ def classify_slot(fdct_observations: dict, fs_station: str,
     return ldt_arrival.timestamp(), li_status
 
 # ─────────────────────────────────────────────────────────────────────────────────────
-def _round_down_to_slot(fdt_time: datetime.datetime) -> datetime.datetime:
+def round_down_to_slot(fdt_time: datetime.datetime) -> datetime.datetime:
     """
     arredonda um horário para baixo, para o início do seu slot de 10 min.
 
@@ -231,7 +234,7 @@ def _parse_observation(fs_mtime: str | float, fs_filepath: str) -> \
                       l_err, fs_mtime, fs_filepath)
         return None
 
-    return (ls_station, _round_down_to_slot(ldt_file_time)), (ldt_file_time, ldt_arrival_utc)
+    return (ls_station, round_down_to_slot(ldt_file_time)), (ldt_file_time, ldt_arrival_utc)
 
 # ─────────────────────────────────────────────────────────────────────────────────────
 def _load_dbase(fs_dbase_path: str, fdt_start_utc: datetime.datetime,
@@ -376,7 +379,7 @@ def _window_slots(fdt_start_utc: datetime.datetime,
     ldt_current = fdt_start_utc
 
     while ldt_current < fdt_end_utc:
-        llst_slots.append(_round_down_to_slot(ldt_current))
+        llst_slots.append(round_down_to_slot(ldt_current))
         ldt_current += datetime.timedelta(minutes=cfg.CI_SLOT_MINUTES)
 
     return llst_slots
@@ -424,7 +427,7 @@ def _unseen_status(fdt_slot: datetime.datetime,
 # ─────────────────────────────────────────────────────────────────────────────────────
 def _station_slots(fdct_observations: dict, fs_station: str, flst_slots: list,
                    fdt_judged_until: datetime.datetime | None,
-                   fb_source_fresh: bool) -> list:
+                   fb_source_fresh: bool, fb_use_maintenance: bool = True) -> list:
     """
     classifica todos os slots de 10 min de uma estação dentro da janela.
 
@@ -437,11 +440,13 @@ def _station_slots(fdct_observations: dict, fs_station: str, flst_slots: list,
     :param flst_slots: inícios de slot da janela (ver _window_slots)
     :param fdt_judged_until: até quando o mvol cobriu (ver _unseen_status)
     :param fb_source_fresh: fonte em dia (ver _unseen_status)
+    :param fb_use_maintenance: False ignora cfg.CLST_STATIONS_MAINTENANCE (a
+                               lista vale para AGORA, não para um período passado)
     :returns: lista de (timestamp, código_status), do slot mais antigo ao mais novo
     """
     llst_statuses = []
     li_received_count = 0
-    lb_maintenance = fs_station in cfg.CLST_STATIONS_MAINTENANCE
+    lb_maintenance = fb_use_maintenance and fs_station in cfg.CLST_STATIONS_MAINTENANCE
 
     for ldt_slot in flst_slots:
         lf_timestamp, li_status = classify_slot(fdct_observations, fs_station, ldt_slot)
@@ -482,6 +487,51 @@ def _source_coverage(fdt_last_update: datetime.datetime | None,
     return min(fdt_last_update, fdt_now_utc), fdt_last_update >= ldt_stale_limit
 
 # ─────────────────────────────────────────────────────────────────────────────────────
+def classify_period(fs_dbase_path: str, fdt_start_utc: datetime.datetime,
+                    fdt_end_utc: datetime.datetime, fdt_now_utc: datetime.datetime,
+                    fb_use_maintenance: bool = True) -> tuple[dict, list, datetime.datetime | None]:
+    """
+    classifica todos os slots de todas as estações num período [início, fim).
+
+    é o núcleo comum do painel (build_station_status: as últimas N horas) e do
+    relatório de disponibilidade (rsmReport.py: um mês, por exemplo).
+
+    fluxo:
+    1. lê do catalog.db as observações do período e a última atualização;
+    2. avisa no log as estações com relógio adiantado (_warn_clock_ahead) e
+       decide a lista de estações (conhecidas + novas vistas no banco);
+    3. calcula até quando o mvol cobriu o tempo (_source_coverage);
+    4. lista os slots do período e classifica cada slot de cada estação.
+
+    :param fs_dbase_path: catalog.db do 21.mvol (só lido, nunca alterado)
+    :param fdt_start_utc: início do período (inclusive), UTC com fuso
+    :param fdt_end_utc: fim do período (exclusive), UTC com fuso
+    :param fdt_now_utc: instante atual, UTC (decide o que já venceu)
+    :param fb_use_maintenance: False ignora cfg.CLST_STATIONS_MAINTENANCE
+    :returns: ({estação: [(timestamp, código_status), ...]}, inícios de slot,
+               max(created_at) ou None)
+    :raises sqlite3.OperationalError: banco inexistente ou ilegível
+    """
+    # o banco é lido a partir do início do PRIMEIRO slot (o período pode
+    # começar no meio de um)
+    ldct_observations, ldt_last_update = _load_dbase(fs_dbase_path,
+                                                     round_down_to_slot(fdt_start_utc),
+                                                     fdt_end_utc)
+
+    _warn_clock_ahead(ldct_observations)
+
+    llst_slots = _window_slots(fdt_start_utc, fdt_end_utc)
+    ldt_judged_until, lb_source_fresh = _source_coverage(ldt_last_update, fdt_now_utc)
+
+    ldct_stations = {}
+    for ls_station in _list_stations(ldct_observations):
+        ldct_stations[ls_station] = _station_slots(ldct_observations, ls_station, llst_slots,
+                                                   ldt_judged_until, lb_source_fresh,
+                                                   fb_use_maintenance)
+
+    return ldct_stations, llst_slots, ldt_last_update
+
+# ─────────────────────────────────────────────────────────────────────────────────────
 def build_station_status(fs_dbase_path: str,
                          fi_window_hours: int = cfg.CI_DEFAULT_WINDOW_HOURS) -> dict:
     """
@@ -489,11 +539,8 @@ def build_station_status(fs_dbase_path: str,
 
     fluxo:
     1. calcula a janela [agora - horas, agora) em UTC;
-    2. lê do catalog.db as observações da janela e a última atualização;
-    3. avisa no log as estações com relógio adiantado (_warn_clock_ahead) e
-       decide a lista de estações (conhecidas + novas vistas no banco);
-    4. calcula até quando o mvol cobriu o tempo (_source_coverage);
-    5. lista os slots da janela e classifica cada slot de cada estação.
+    2. classifica a janela (classify_period);
+    3. monta o documento do JSON de status.
 
     :param fs_dbase_path: catalog.db do 21.mvol (só lido, nunca alterado)
     :param fi_window_hours: janela, em horas
@@ -510,21 +557,8 @@ def build_station_status(fs_dbase_path: str,
     ldt_end_utc = ldt_now_utc.replace(second=0, microsecond=0)
     ldt_start_utc = ldt_end_utc - datetime.timedelta(hours=fi_window_hours)
 
-    # o banco é lido a partir do início do PRIMEIRO slot (a janela pode
-    # começar no meio de um)
-    ldct_observations, ldt_last_update = _load_dbase(fs_dbase_path,
-                                                     _round_down_to_slot(ldt_start_utc),
-                                                     ldt_end_utc)
-
-    _warn_clock_ahead(ldct_observations)
-
-    llst_slots = _window_slots(ldt_start_utc, ldt_end_utc)
-    ldt_judged_until, lb_source_fresh = _source_coverage(ldt_last_update, ldt_now_utc)
-
-    ldct_stations = {}
-    for ls_station in _list_stations(ldct_observations):
-        ldct_stations[ls_station] = _station_slots(ldct_observations, ls_station, llst_slots,
-                                                   ldt_judged_until, lb_source_fresh)
+    ldct_stations, llst_slots, ldt_last_update = classify_period(fs_dbase_path, ldt_start_utc,
+                                                                 ldt_end_utc, ldt_now_utc)
 
     ls_last_update = None
     if ldt_last_update is not None:
