@@ -30,6 +30,7 @@ saída (esquema 2, cfg.CI_STATUS_SCHEMA_VERSION):
 tudo é UTC, com fuso explícito: o mtime do banco é um epoch (não tem fuso) e
 o horário no nome do arquivo é UTC.  Não depende do fuso da máquina.
 
+2026.nov  mlabru  relógio lido num ponto só (_utc_now), que os testes congelam
 2026.nov  mlabru  JSON esquema 2: atraso em segundos no lugar do timestamp
                   (que mudava de sentido e ninguém usava), schema_version e
                   source_heartbeat; classify_slot devolve None para slot sem
@@ -642,6 +643,19 @@ def classify_period(fs_dbase_path: str, fdt_start_utc: datetime.datetime,
     return ldct_stations, llst_slots, ldt_last_update
 
 # ─────────────────────────────────────────────────────────────────────────────────────
+def _utc_now() -> datetime.datetime:
+    """
+    lê o relógio: o ÚNICO lugar do rsmStatus que faz isso.
+
+    um ponto só deixa os testes congelarem o "agora" (monkeypatch): sem isso,
+    um teste que calcula a janela e depois chama build_station_status lia o
+    relógio duas vezes e falhava se uma virada de slot caísse entre as duas.
+
+    :returns: instante atual, UTC com fuso
+    """
+    return datetime.datetime.now(datetime.timezone.utc)
+
+# ─────────────────────────────────────────────────────────────────────────────────────
 def build_station_status(fs_dbase_path: str,
                          fi_window_hours: int = cfg.CI_DEFAULT_WINDOW_HOURS,
                          fs_mvol_heartbeat: str | None = None) -> dict:
@@ -666,7 +680,7 @@ def build_station_status(fs_dbase_path: str,
     :raises sqlite3.OperationalError: banco inexistente ou ilegível
     """
     # um único "agora" para toda a rodada
-    ldt_now_utc = datetime.datetime.now(datetime.timezone.utc)
+    ldt_now_utc = _utc_now()
 
     # a janela termina no minuto atual (segundos descartados)
     ldt_end_utc = ldt_now_utc.replace(second=0, microsecond=0)

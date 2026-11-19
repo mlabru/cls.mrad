@@ -44,6 +44,23 @@ import rsmStatus as rs
 
 # < constants >────────────────────────────────────────────────────────────────────────
 
+# "agora" congelado de cada teste (fixture frozen_now): o rsmStatus e os
+# helpers abaixo leem o MESMO instante, então uma virada de slot durante o
+# teste não muda nada
+MDT_NOW = None
+
+
+@pytest.fixture(autouse=True)
+def frozen_now(monkeypatch):
+    """
+    congela o relógio do rsmStatus (_utc_now) no instante em que o teste começa
+    """
+    global MDT_NOW
+    MDT_NOW = datetime.datetime.now(datetime.timezone.utc)
+    monkeypatch.setattr(rs, "_utc_now", lambda: MDT_NOW)
+    return MDT_NOW
+
+
 # instante de referência usado nos testes de classify_slot
 CDT_BASE = datetime.datetime(2026, 4, 12, 0, 0, 0, tzinfo=datetime.timezone.utc)
 
@@ -155,7 +172,7 @@ def _first_slot_of_window(fi_window_hours):
     """
     replica o cálculo interno do primeiro slot de uma janela de fi_window_hours
     """
-    ldt_end = datetime.datetime.now(datetime.timezone.utc).replace(second=0, microsecond=0)
+    ldt_end = MDT_NOW.replace(second=0, microsecond=0)
     ldt_start = ldt_end - datetime.timedelta(hours=fi_window_hours)
     li_min = (ldt_start.minute // cfg.CI_SLOT_MINUTES) * cfg.CI_SLOT_MINUTES
     return ldt_start.replace(minute=li_min, second=0, microsecond=0)
@@ -216,8 +233,7 @@ def _iso_minutes_ago(fi_minutes):
     """
     created_at (ISO UTC) de fi_minutes atrás, como o mvol grava
     """
-    ldt_now = datetime.datetime.now(datetime.timezone.utc)
-    return (ldt_now - datetime.timedelta(minutes=fi_minutes)).isoformat()
+    return (MDT_NOW - datetime.timedelta(minutes=fi_minutes)).isoformat()
 
 
 def _slot_starts(fdct_out, fs_station):
@@ -347,7 +363,7 @@ def test_classify_period_can_ignore_maintenance(make_dbase, monkeypatch):
     monkeypatch.setattr(cfg, "CLST_STATIONS_MAINTENANCE", frozenset((ls_station,)))
     # uma linha qualquer, só para o mvol ter registrado algo agora (fonte em dia)
     lpth = make_dbase([("Outro/250/x.mvol", 1.0)], fs_created_at=_iso_minutes_ago(0))
-    ldt_now = datetime.datetime.now(datetime.timezone.utc)
+    ldt_now = MDT_NOW
     ldt_start = datetime.datetime(2026, 10, 5, tzinfo=datetime.timezone.utc)
     ldt_end = ldt_start + datetime.timedelta(hours=1)
 
@@ -432,14 +448,12 @@ def test_build_station_status_reports_generation_and_last_slot(make_dbase):
     o documento diz quando foi gerado e qual é o slot da última coluna (o PNG
     rotula o eixo por ele); a última coluna é o slot anterior ao atual
     """
-    ldt_before = datetime.datetime.now(datetime.timezone.utc)
     ldct_out = rs.build_station_status(str(make_dbase([])), 2)
-    ldt_after = datetime.datetime.now(datetime.timezone.utc)
 
     ldt_generated = datetime.datetime.fromisoformat(ldct_out["generated_at"])
     ldt_last_slot = datetime.datetime.fromisoformat(ldct_out["last_slot"])
 
-    assert ldt_before <= ldt_generated <= ldt_after
+    assert ldt_generated == MDT_NOW
     assert ldt_last_slot.minute % cfg.CI_SLOT_MINUTES == 0
     assert ldt_last_slot.second == 0
     ldt_end = ldt_generated.replace(second=0, microsecond=0)
@@ -564,7 +578,7 @@ def test_build_station_status_selects_by_file_time_not_arrival(make_dbase):
 
     ldt_old_file = ldt_slot - datetime.timedelta(hours=1)
     ls_path_old, _ = _row_on_time(ls_station, ldt_old_file)
-    lf_mtime_now = datetime.datetime.now(datetime.timezone.utc).timestamp()
+    lf_mtime_now = MDT_NOW.timestamp()
 
     lpth = make_dbase([(ls_path_in, lf_mtime_very_late), (ls_path_old, lf_mtime_now)])
     llst_status = [s for _, s in rs.build_station_status(str(lpth), li_window_hours)
@@ -682,7 +696,7 @@ def _write_heartbeat(fpth, fi_minutes_ago):
     """
     heartbeat no formato do cls_heartbeat ("<epoch> <ISO UTC>"), de fi_minutes_ago atrás
     """
-    li_epoch = int(time.time()) - fi_minutes_ago * 60
+    li_epoch = int(MDT_NOW.timestamp()) - fi_minutes_ago * 60
     fpth.write_text(f"{li_epoch} 2026-11-19T00:00:00Z\n", encoding="utf-8")
     return str(fpth)
 
@@ -694,7 +708,7 @@ def test_read_mvol_heartbeat(tmp_path, caplog):
     ldt = rs.read_mvol_heartbeat(ls_ok)
 
     assert ldt.tzinfo == datetime.timezone.utc
-    assert abs((datetime.datetime.now(datetime.timezone.utc) - ldt).total_seconds() - 300) < 5
+    assert abs((MDT_NOW - ldt).total_seconds() - 300) < 1
     # não configurado: None, sem aviso
     assert rs.read_mvol_heartbeat(None) is None
     assert "heartbeat" not in caplog.text

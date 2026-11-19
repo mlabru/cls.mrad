@@ -1,13 +1,14 @@
+# pastas locais (documentação em repositório próprio, rascunhos, cópias antigas)
 .bkp/
 .claude/
 .doc/
 .gpt/
-logs/
 .new/
 .old/
+
+# gerados
 __pycache__/
 .pytest_cache/
-tst_env/
 .venv/
 
 .env
@@ -16,17 +17,14 @@ tst_env/
 *.bak
 *.err
 *.log
-*.mvol
-*.npy
 
-# bancos SQLite (o catalog.db compartilhado mora em 27.nowcast/04.dvl/data/dbase)
+# o catalog.db é do 21.mvol (CLS_DBASE_FILE/RSM_DBASE_FILE, fora do repo);
+# uma cópia para teste nunca vai para o git
 *.db
 *.db-shm
 *.db-wal
 
-# intermediários por execução (VOL_TEMP; ex: PNGs do volViewer em data/temp/viewer)
-data/temp/
-
-# links locais para os dados da raiz da instalação (CLS_ROOT); os scripts
-# não dependem deles (banco/CAPPIs vêm do cls.env)
-data/dbase
+# dados e logs de execução: ficam sob RSM_PATH (padrão ~/Public/mrad), fora do
+# repo; se um RSM_PATH de desenvolvimento apontar para cá, não vão para o git
+data/
+logs/
