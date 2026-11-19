@@ -27,6 +27,8 @@ notifica decide a frequência), como o vol_check.sh do 21.mvol.
 uso:
     python rsmCheck.py [-i STATUS.json] [--max-age MIN]
 
+2026.nov  mlabru  fonte pela mesma frase da faixa do PNG
+                  (rsm_stats.source_problem): exata com o heartbeat do mvol
 2026.nov  mlabru  initial version (Linux/Python)
 """
 # < imports >──────────────────────────────────────────────────────────────────────────
@@ -93,12 +95,10 @@ def _document_problems(fdct_document: dict, fdt_now_utc: datetime.datetime,
         ls_when = "nunca" if ldt_generated is None else f"{ldt_generated:%Y-%m-%d %H:%M} UTC"
         llst_problems.append(f"JSON de status velho (gerado: {ls_when}; monrad parado?)")
 
-    ldt_last_update = rst.document_time(fdct_document, "source_last_update")
+    ls_source_problem = rst.source_problem(fdct_document, fdt_now_utc)
 
-    if rst.is_source_stale(ldt_last_update, fdt_now_utc):
-        ls_when = "nunca" if ldt_last_update is None else f"{ldt_last_update:%Y-%m-%d %H:%M} UTC"
-        llst_problems.append(f"catalog.db sem observação nova desde {ls_when} "
-                             f"(21.mvol parado ou nenhuma estação enviando)")
+    if ls_source_problem is not None:
+        llst_problems.append(ls_source_problem)
 
     return llst_problems
 

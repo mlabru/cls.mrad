@@ -17,6 +17,10 @@
 # remoto nem acesso aos .mvol.
 #
 
+# 2026.nov  mlabru  RSM_MVOL_SYNC_OK_FILE: heartbeat do vol_sync.sh do 21.mvol
+#                   (só lido), para distinguir mvol parado de radares mudos;
+#                   entra na trava de teste
+#
 # 2026.nov  mlabru  alarme: RSM_RUN_OK_FILE (heartbeat do rsm_run.sh) e
 #                   RSM_CHECK_MAX_AGE_MIN, lidos pelo rsm_check.sh
 #
@@ -90,6 +94,12 @@ RSM_TMP="${RSM_DATA}/temp"
 # CLS_DBASE_FILE (cls.env, raiz CLS_ROOT) > padrão
 RSM_DBASE_FILE="${RSM_DBASE_FILE:-${CLS_DBASE_FILE:-/home/${USER}/Public/mvol/data/dbase/catalog.db}}"
 
+# heartbeat do vol_sync.sh do 21.mvol (o VOL_SYNC_OK_FILE do vol_cfg.sh), só
+# lido: com ele o monrad distingue "mvol parado" de "radares mudos".  Vem do
+# VOL_PATH do mvol (cls.env ou ambiente; o cls.test o exporta), como o padrão
+# do vol_cfg.sh.  Ausente ou ilegível: a fonte é julgada só pelo banco
+RSM_MVOL_SYNC_OK_FILE="${RSM_MVOL_SYNC_OK_FILE:-${VOL_PATH:-/home/${USER}/Public/mvol}/data/state/vol_sync.ok}"
+
 # JSON de status (saída do rsmStatus.py; entrada do rsmPNG.py)
 RSM_STATUS_JSON="${RSM_TMP}/rsm_temp.json"
 # PNG estático do monitor (saída do rsmPNG.py)
@@ -134,7 +144,7 @@ fi
 source "${CLS_LIB}/cls_common.sh"
 
 # com CLS_ENV=test, nada pode apontar para fora de CLS_TST_ROOT
-cls_check_test_env "${RSM_PATH}" "${RSM_DBASE_FILE}" || exit 1
+cls_check_test_env "${RSM_PATH}" "${RSM_DBASE_FILE}" "${RSM_MVOL_SYNC_OK_FILE}" || exit 1
 
 # < pacote Python comum >--------------------------------------------------------------
 

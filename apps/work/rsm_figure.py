@@ -20,6 +20,9 @@ saída: uma matplotlib Figure com três painéis empilhados:
 
 não faz I/O nem abre janela -- por isso é testável sem display.
 
+2026.nov  mlabru  docstrings sem nomes de cor (a paleta mudou: rsm_config)
+2026.nov  mlabru  source_alert usa rsm_stats.source_problem (exato com o
+                  heartbeat do mvol: mvol parado x estações mudas)
 2026.nov  mlabru  contas e leitura do JSON no work.rsm_stats (sem matplotlib,
                   para o alarme e o relatório usarem a mesma regra)
 2026.nov  mlabru  status "manutenção" (MAINT) fora das estatísticas; legenda
@@ -139,31 +142,21 @@ def source_alert(fdct_document: dict, fdt_now_utc: datetime.datetime) -> str | N
     """
     decide se o painel deve avisar que a fonte de dados pode estar parada.
 
-    o monrad só vê o que o 21.mvol grava no catalog.db.  Se nenhuma
-    observação nova entrou há mais de cfg.CI_SOURCE_STALE_MINUTES, os slots
-    aparecem como perdidos sem que se saiba se a culpa é dos radares ou do
-    mvol -- o aviso deixa isso explícito.
+    a frase e a regra são as do alarme (rsm_stats.source_problem): mvol
+    parado, estações mudas com o mvol em dia, ou, sem o heartbeat do mvol, os
+    dois casos juntos.
 
     :param fdct_document: conteúdo do JSON de status
     :param fdt_now_utc: instante atual, UTC, com fuso
     :returns: texto do aviso, ou None se a fonte está em dia (ou se o JSON é do
               formato antigo, que não traz essa informação)
     """
-    if "source_last_update" not in fdct_document:
+    ls_problem = rst.source_problem(fdct_document, fdt_now_utc)
+
+    if ls_problem is None:
         return None
 
-    ldt_last_update = rst.document_time(fdct_document, "source_last_update")
-
-    if ldt_last_update is None:
-        return "⚠  catalog.db sem nenhuma observação registrada pelo 21.mvol"
-
-    # a regra de "parada" é a mesma do alarme (rsmCheck.py)
-    if not rst.is_source_stale(ldt_last_update, fdt_now_utc):
-        return None
-
-    return (f"⚠  catalog.db sem observações novas desde "
-            f"{ldt_last_update:%Y-%m-%d %H:%M} UTC  "
-            f"(21.mvol parado ou nenhuma estação enviando)")
+    return f"⚠  {ls_problem}"
 
 # ─────────────────────────────────────────────────────────────────────────────────────
 def cap_window(fdct_data: dict, fi_window_hours: int) -> tuple[dict, int, int]:
@@ -251,7 +244,7 @@ def _rate_color(ff_success_rate: float) -> str:
     escolhe a cor do card "Taxa de Sucesso".
 
     :param ff_success_rate: % de slots no prazo
-    :returns: verde (>= 90%), âmbar (>= 75%) ou vermelho (abaixo disso)
+    :returns: a cor de "no prazo" (>= 90%), de "atraso leve" (>= 75%) ou de "perdido" (abaixo disso)
     """
     if ff_success_rate >= cfg.CF_RATE_GOOD_PCT:
         return cfg.CS_C_OK
@@ -521,7 +514,7 @@ def build_figure(fdct_data: dict, fdt_ref_time: datetime.datetime,
     1. define a ordem das estações;
     2. cria a figura com três painéis empilhados (grid, barras, cards);
     3. desenha cada painel;
-    4. se houver aviso (fonte parada), escreve-o em vermelho no topo.
+    4. se houver aviso (fonte parada), escreve-o na cor de "perdido", no topo.
 
     :param fdct_data: status por estação ({estação: [(timestamp, status), ...]})
     :param fdt_ref_time: instante de referência (horário do slot mais recente,

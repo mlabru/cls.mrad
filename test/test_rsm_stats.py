@@ -7,6 +7,7 @@ test_rsm_stats
 testes das contas sobre o JSON de status (work.rsm_stats), comuns ao PNG, ao
 alarme (rsmCheck.py) e ao relatório (rsmReport.py)
 
+2026.nov  mlabru  source_problem (com e sem o heartbeat do mvol)
 2026.nov  mlabru  initial version (Linux/Python): inclui os testes de
                   station_order e stations_from_document vindos do
                   test_rsm_figure.py
@@ -125,6 +126,41 @@ def test_is_source_stale(fi_minutes_ago, fb_stale):
 
 def test_is_source_stale_without_any_observation():
     assert rst.is_source_stale(None, CDT_NOW_UTC) is True
+
+
+def _source_doc(fi_last_minutes, fi_heartbeat_minutes):
+    """
+    documento só com as chaves da fonte; None = chave nula
+    """
+    def _iso(fi_minutes):
+        if fi_minutes is None:
+            return None
+        return (CDT_NOW_UTC - datetime.timedelta(minutes=fi_minutes)).isoformat()
+
+    return {"source_last_update": _iso(fi_last_minutes),
+            "source_heartbeat": _iso(fi_heartbeat_minutes)}
+
+
+@pytest.mark.parametrize("fi_last, fi_heartbeat, fs_expected", [
+    (5, None, None),                                   # arquivo novo recente
+    (5, 300, None),                                    # recente, heartbeat velho: rsync falhando, é do mvol
+    (300, 5, "as estações pararam de enviar"),         # mvol em dia, radares mudos
+    (None, 5, "as estações pararam de enviar"),        # banco vazio, mvol em dia
+    (300, 300, "21.mvol parado"),                      # os dois velhos
+    (300, None, "21.mvol parado ou nenhuma estação"),  # sem heartbeat: ambíguo
+    (None, None, "sem nenhuma observação"),            # banco vazio, sem heartbeat
+])
+def test_source_problem(fi_last, fi_heartbeat, fs_expected):
+    ls_problem = rst.source_problem(_source_doc(fi_last, fi_heartbeat), CDT_NOW_UTC)
+
+    if fs_expected is None:
+        assert ls_problem is None
+    else:
+        assert fs_expected in ls_problem
+
+
+def test_source_problem_old_format_says_nothing():
+    assert rst.source_problem({"A-250": []}, CDT_NOW_UTC) is None
 
 
 def test_document_time_missing_or_null_key():

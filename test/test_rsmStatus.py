@@ -6,6 +6,8 @@ Copyright (c) 1995-2026, Instituto de Controle do Espaço Aéreo
 test_rsmStatus
 testes unitários de rsmStatus
 
+2026.nov  mlabru  esquema 2 do JSON (atraso no par, classify_slot None);
+                  heartbeat do mvol; leitura divergente do nome
 2026.nov  mlabru  carência pela constante (40 min); classify_period sem a
                   lista de manutenção (relatório)
 2026.nov  mlabru  aviso de relógio do radar adiantado
@@ -61,26 +63,28 @@ def _received(ff_delay_minutes):
     return {("Cangucu-250", CDT_BASE): (CDT_FILE_TIME, ldt_arrival)}, ldt_arrival
 
 
-def test_classify_slot_missing_when_key_absent():
+def test_classify_slot_returns_none_when_key_absent():
     """
-    se o arquivo esperado não está no dict recebido, o status é MISS
+    arquivo esperado fora do dict: None -- quem decide o status de um slot sem
+    arquivo é _unseen_status (MISS, FUTURE, NOSRC ou MAINT), não classify_slot
     """
-    lt_ts, li_status = rs.classify_slot({}, "Cangucu-250", CDT_BASE)
-
-    assert li_status == cfg.CI_ST_MISS
-    assert lt_ts == CDT_BASE.timestamp()
+    assert rs.classify_slot({}, "Cangucu-250", CDT_BASE) is None
 
 
-def test_classify_slot_returns_arrival_timestamp():
+@pytest.mark.parametrize("ff_delay_minutes, fi_delay_seconds", [(5, 300), (-4.5, -270),
+                                                                (1 / 60 * 0.6, 1)])
+def test_classify_slot_returns_delay_in_whole_seconds(ff_delay_minutes, fi_delay_seconds):
     """
-    slot recebido: o timestamp devolvido é o da chegada
+    slot recebido: devolve o atraso (chegada - horário do nome) em segundos
+    inteiros, negativo quando o relógio do radar está adiantado
     """
-    ldct_received, ldt_arrival = _received(5)
+    ldct_received, _ = _received(ff_delay_minutes)
 
-    lt_ts, li_status = rs.classify_slot(ldct_received, "Cangucu-250", CDT_BASE)
+    li_delay, li_status = rs.classify_slot(ldct_received, "Cangucu-250", CDT_BASE)
 
     assert li_status == cfg.CI_ST_OK
-    assert lt_ts == ldt_arrival.timestamp()
+    assert li_delay == fi_delay_seconds
+    assert isinstance(li_delay, int)
 
 
 def test_classify_slot_delay_counts_from_file_time_not_slot_start():
@@ -216,6 +220,18 @@ def _iso_minutes_ago(fi_minutes):
     return (ldt_now - datetime.timedelta(minutes=fi_minutes)).isoformat()
 
 
+def _slot_starts(fdct_out, fs_station):
+    """
+    início de cada coluna de uma estação, tirado do last_slot (esquema 2: o
+    par do slot não traz mais o horário)
+    """
+    ldt_last_slot = datetime.datetime.fromisoformat(fdct_out["last_slot"])
+    li_count = len(fdct_out["stations"][fs_station])
+
+    return [ldt_last_slot - datetime.timedelta(minutes=cfg.CI_SLOT_MINUTES * (li_count - 1 - li))
+            for li in range(li_count)]
+
+
 def _statuses(fdct_out, fs_station):
     """
     só os códigos de status de uma estação, do slot mais antigo ao mais novo
@@ -276,9 +292,9 @@ def test_build_station_status_stopped_source_is_no_source_after_coverage(make_db
     ldt_grace = datetime.timedelta(minutes=cfg.CI_PENDING_GRACE_MINUTES)
 
     for ls_station in cfg.CLST_STATIONS:
-        for lf_timestamp, li_status in ldct_out["stations"][ls_station]:
-            ldt_slot = datetime.datetime.fromtimestamp(lf_timestamp, datetime.timezone.utc)
+        llst_starts = _slot_starts(ldct_out, ls_station)
 
+        for ldt_slot, (_, li_status) in zip(llst_starts, ldct_out["stations"][ls_station]):
             if ldt_slot + ldt_grace <= ldt_last_update:
                 assert li_status == cfg.CI_ST_MISS
             else:
@@ -431,17 +447,28 @@ def test_build_station_status_reports_generation_and_last_slot(make_dbase):
     assert ldt_last_slot <= ldt_end - datetime.timedelta(minutes=cfg.CI_SLOT_MINUTES)
 
 
-def test_build_station_status_slot_timestamps_are_utc_epochs(make_dbase):
+def test_build_station_status_pairs_carry_delay_or_none(make_dbase):
     """
-    o timestamp de cada slot MISS é o epoch do início do slot (antes saía 3h
-    adiantado: datetime UTC sem fuso convertido como hora local)
+    esquema 2: o par de cada slot é [atraso_s, status]; slot sem arquivo tem
+    atraso None; o horário da coluna sai do last_slot (e o primeiro slot é
+    o mesmo que build_station_status calculou)
     """
-    ldct_out = rs.build_station_status(str(make_dbase([])), 1)
-    llst_slots = ldct_out["stations"][cfg.CLST_STATIONS[0]]
+    li_window_hours = 2
+    ls_station = cfg.CLST_STATIONS[0]
+    # um slot no meio da janela: continua dentro mesmo se o relógio virar um
+    # slot entre o cálculo aqui e o do build_station_status
+    ldt_file_slot = _first_slot_of_window(li_window_hours) + datetime.timedelta(minutes=30)
+    ls_path, lf_mtime = _row_on_time(ls_station, ldt_file_slot)
+    lpth = make_dbase([(ls_path, lf_mtime + 125.4)], fs_created_at=_iso_minutes_ago(0))
 
-    ldt_last_slot = datetime.datetime.fromisoformat(ldct_out["last_slot"])
+    ldct_out = rs.build_station_status(str(lpth), li_window_hours)
+    llst_pairs = ldct_out["stations"][ls_station]
+    li_file_col = _slot_starts(ldct_out, ls_station).index(ldt_file_slot)
 
-    assert llst_slots[-1][0] == ldt_last_slot.timestamp()
+    assert ldct_out["schema_version"] == cfg.CI_STATUS_SCHEMA_VERSION == 2
+    assert tuple(llst_pairs[li_file_col]) == (125, cfg.CI_ST_OK)
+    assert all(li_delay is None for li_col, (li_delay, _) in enumerate(llst_pairs)
+               if li_col != li_file_col)
 
 
 def test_build_station_status_reports_source_last_update(make_dbase):
@@ -649,6 +676,121 @@ def test_clock_ahead_does_not_change_statuses(make_dbase, caplog):
     assert llst_status[:cfg.CI_CLOCK_AHEAD_MIN_FILES] == [cfg.CI_ST_OK] * cfg.CI_CLOCK_AHEAD_MIN_FILES
     assert any("relógio do radar adiantado" in l_rec.getMessage() for l_rec in caplog.records)
 
+# < heartbeat do 21.mvol >─────────────────────────────────────────────────────────────
+
+def _write_heartbeat(fpth, fi_minutes_ago):
+    """
+    heartbeat no formato do cls_heartbeat ("<epoch> <ISO UTC>"), de fi_minutes_ago atrás
+    """
+    li_epoch = int(time.time()) - fi_minutes_ago * 60
+    fpth.write_text(f"{li_epoch} 2026-11-19T00:00:00Z\n", encoding="utf-8")
+    return str(fpth)
+
+
+def test_read_mvol_heartbeat(tmp_path, caplog):
+    ls_ok = _write_heartbeat(tmp_path / "vol_sync.ok", 5)
+    (tmp_path / "lixo.ok").write_text("não é epoch\n", encoding="utf-8")
+
+    ldt = rs.read_mvol_heartbeat(ls_ok)
+
+    assert ldt.tzinfo == datetime.timezone.utc
+    assert abs((datetime.datetime.now(datetime.timezone.utc) - ldt).total_seconds() - 300) < 5
+    # não configurado: None, sem aviso
+    assert rs.read_mvol_heartbeat(None) is None
+    assert "heartbeat" not in caplog.text
+    # ausente ou ilegível: None, com aviso
+    assert rs.read_mvol_heartbeat(str(tmp_path / "nao_existe.ok")) is None
+    assert rs.read_mvol_heartbeat(str(tmp_path / "lixo.ok")) is None
+    assert caplog.text.count("heartbeat do 21.mvol ilegível") == 2
+
+
+def test_source_coverage_uses_the_newest_of_dbase_and_heartbeat():
+    ldt_now = datetime.datetime(2026, 11, 19, 12, 0, tzinfo=datetime.timezone.utc)
+    ldt_old = ldt_now - datetime.timedelta(hours=3)
+    ldt_recent = ldt_now - datetime.timedelta(minutes=5)
+
+    # radares mudos, mvol em dia: cobertura e frescor vêm do heartbeat
+    assert rs._source_coverage(ldt_old, ldt_now, ldt_recent) == (ldt_recent, True)
+    # banco vazio, mvol em dia
+    assert rs._source_coverage(None, ldt_now, ldt_recent) == (ldt_recent, True)
+    # mvol parado: os dois velhos
+    assert rs._source_coverage(ldt_old, ldt_now, ldt_old) == (ldt_old, False)
+
+
+def test_silent_radars_with_mvol_running_are_miss_not_no_source(make_dbase, tmp_path):
+    """
+    nenhum arquivo novo há 3 h, mas o vol_sync.sh terminou bem há 5 min: os
+    radares estão mudos e o mvol está em dia -- os slots são julgados (MISS),
+    não "Sem fonte"; só a carência do fim fica "Aguardando"
+    """
+    lpth = make_dbase([("Outro/250/x.mvol", 1.0)], fs_created_at=_iso_minutes_ago(180))
+    ls_heartbeat = _write_heartbeat(tmp_path / "vol_sync.ok", 5)
+
+    ldct_out = rs.build_station_status(str(lpth), 6, ls_heartbeat)
+
+    assert ldct_out["source_heartbeat"] is not None
+    for ls_station in cfg.CLST_STATIONS:
+        lset_statuses = set(_statuses(ldct_out, ls_station))
+        assert cfg.CI_ST_NOSRC not in lset_statuses
+        assert lset_statuses == {cfg.CI_ST_MISS, cfg.CI_ST_FUTURE}
+
+
+def test_stopped_mvol_heartbeat_keeps_no_source(make_dbase, tmp_path):
+    """
+    heartbeat tão velho quanto o banco: o mvol parou -- "Sem fonte" como sem heartbeat
+    """
+    lpth = make_dbase([("Outro/250/x.mvol", 1.0)], fs_created_at=_iso_minutes_ago(180))
+    ls_heartbeat = _write_heartbeat(tmp_path / "vol_sync.ok", 180)
+
+    ldct_with = rs.build_station_status(str(lpth), 6, ls_heartbeat)
+    ldct_without = rs.build_station_status(str(lpth), 6)
+
+    # as duas rodadas podem cair em slots diferentes do relógio: compara o
+    # que cada uma produz, não a lista exata
+    ls_station = cfg.CLST_STATIONS[0]
+    for ldct_out in (ldct_with, ldct_without):
+        assert set(_statuses(ldct_out, ls_station)) == {cfg.CI_ST_MISS, cfg.CI_ST_NOSRC}
+    assert ldct_with["source_heartbeat"] is not None
+    assert ldct_without["source_heartbeat"] is None
+
+# < leitura divergente do nome >───────────────────────────────────────────────────────
+
+def test_divergent_name_time_is_warned_once_and_monrad_reading_wins(make_dbase, caplog):
+    """
+    timestamp do mvol diferente do horário que o monrad lê no nome: um aviso
+    só, com a contagem; a coluna continua sendo a da leitura do monrad
+    """
+    li_window_hours = 2
+    ls_station = cfg.CLST_STATIONS[0]
+    ldt_first = _first_slot_of_window(li_window_hours)
+    llst_rows = [_row_on_time(ls_station, ldt_first),
+                 _row_on_time(ls_station, ldt_first + datetime.timedelta(minutes=10))]
+    lpth = make_dbase(llst_rows, fs_created_at=_iso_minutes_ago(0))
+
+    # o mvol "leu" 5 s a mais nos dois arquivos
+    l_conn = sqlite3.connect(str(lpth))
+    l_conn.execute("UPDATE vol_raw_observations SET timestamp = timestamp + 5")
+    l_conn.commit()
+    l_conn.close()
+
+    with caplog.at_level("WARNING"):
+        ldct_out = rs.build_station_status(str(lpth), li_window_hours)
+
+    assert caplog.text.count("horário do nome lido diferente") == 1
+    assert "2 arquivo(s)" in caplog.text
+    assert _statuses(ldct_out, ls_station)[:2] == [cfg.CI_ST_OK, cfg.CI_ST_OK]
+
+
+def test_matching_name_time_has_no_divergence_warning(make_dbase, caplog):
+    ls_station = cfg.CLST_STATIONS[0]
+    lpth = make_dbase([_row_on_time(ls_station, _first_slot_of_window(2))],
+                      fs_created_at=_iso_minutes_ago(0))
+
+    with caplog.at_level("WARNING"):
+        rs.build_station_status(str(lpth), 2)
+
+    assert "horário do nome lido diferente" not in caplog.text
+
 # < main >─────────────────────────────────────────────────────────────────────────────
 
 def test_main_writes_status_document(make_dbase, tmp_path):
@@ -660,7 +802,8 @@ def test_main_writes_status_document(make_dbase, tmp_path):
     assert rs.main(["-d", str(make_dbase([])), "-w", "1", "-s", str(lpth_out)]) == 0
 
     ldct = json.loads(lpth_out.read_text(encoding="utf-8"))
-    assert set(ldct.keys()) == {"generated_at", "last_slot", "source_last_update", "stations"}
+    assert set(ldct.keys()) == {"schema_version", "generated_at", "last_slot",
+                                "source_last_update", "source_heartbeat", "stations"}
     # gravação atômica: nenhum temporário sobra no diretório
     # -wal/-shm são do modo WAL do catalog.db (o de produção também é WAL)
     assert sorted(ls for ls in os.listdir(tmp_path)

@@ -7,6 +7,7 @@ test_rsm_run_sh
 testes do rsm_run.sh carregado com RSM_RUN_NO_MAIN=true (só as funções, sem
 rodar o main), no padrão de test_ofl_run.py / test_vol_register.py
 
+2026.nov  mlabru  --mvol-heartbeat repassado ao rsmStatus
 2026.nov  mlabru  heartbeat (cls_heartbeat) só depois dos dois programas
 2026.out  mlabru  rsm_activate_venv (RSM_VENV, o ~/.venv do oflow/nowcast)
 2026.out  mlabru  banco como única fonte: sem fetch_remote_listing
@@ -140,6 +141,12 @@ def test_main_grava_heartbeat_so_depois_dos_programas():
 
     assert ls_text.index("    run_python_step rsmPNG") < \
            ls_text.index('    cls_heartbeat "${RSM_RUN_OK_FILE}"')
+
+
+def test_main_passa_o_heartbeat_do_mvol_ao_rsmstatus():
+    ls_text = (MPTH_ROOT / "rsm_run.sh").read_text(encoding="utf-8")
+
+    assert '--mvol-heartbeat "${RSM_MVOL_SYNC_OK_FILE}"' in ls_text
 
 
 def test_heartbeat_fica_no_estado_do_monrad(tmp_path):

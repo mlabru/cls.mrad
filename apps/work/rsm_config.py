@@ -10,6 +10,9 @@ limiares de atraso e a lista mínima de estações monitoradas.
 é o único lugar onde esses valores são definidos; rsmStatus.py, rsm_figure.py,
 rsmPNG.py e rsm_figure.py só os leem.
 
+2026.nov  mlabru  paleta dos status legível por daltônicos (azul/amarelo/
+                  laranja/carmim + 3 cinzas), validada; JSON esquema 2
+                  (CI_STATUS_SCHEMA_VERSION)
 2026.nov  mlabru  carência 20 -> 40 min (CI_PENDING_GRACE_MINUTES): no banco
                   real o mvol registra o arquivo ~30 min após o início do
                   slot, e 20 min pintava uma coluna inteira de MISS falso a
@@ -52,17 +55,26 @@ CS_GRAY      = "#30363d"
 CS_TEXT_MAIN = "#e6edf3"
 CS_TEXT_SUB  = "#8b949e"
 
-# cor de cada status
-CS_C_DELAY_L = "#db6d28"   # laranja  - atraso grande
-CS_C_DELAY_S = "#d29922"   # âmbar    - atraso pequeno
-CS_C_MISS    = "#f85149"   # vermelho - perdido
-CS_C_OK      = "#3fb950"   # verde    - chegou no prazo
-# slot que ainda não venceu: mesma cor do fundo dos cards, para "sumir" no grid
-CS_C_FUTURE  = CS_BG_CARD
-# cinza   - sem fonte (o 21.mvol parou de registrar; não dá para julgar o radar)
-CS_C_NOSRC   = "#6e7681"
+# cor de cada status (paleta legível por daltônicos, 2026.nov) -------------------------
+# validada com o validate_palette.js da skill dataviz sobre o fundo CS_BG_DARK,
+# os 7 status juntos, todos os pares (numa grade qualquer status encosta em
+# qualquer outro): pior par sob daltonismo ΔE 9,3 (protan) / 8,2 (tritan),
+# pior par com visão normal ΔE 15,7; alvo >= 8 e >= 15.  A paleta anterior
+# (verde/âmbar/laranja/vermelho) tinha "no prazo" x "perdido" a ΔE 2,2 para
+# deuteranopia (as duas cores pareciam iguais) e "atraso grave" x "perdido" a
+# 8,2 até para visão normal.  "No prazo" é azul, e não verde, justamente para
+# não depender do par verde/vermelho.  Ao mudar uma cor, valide de novo os 7
+# juntos (DECISOES, D36).
+CS_C_OK      = "#4c8fe6"   # azul          - chegou no prazo
+CS_C_DELAY_S = "#dcb000"   # amarelo       - atraso pequeno
+CS_C_DELAY_L = "#e06c00"   # laranja       - atraso grande
+CS_C_MISS    = "#d6336c"   # carmim        - perdido
+# slot que ainda não venceu: a cor do painel, para "sumir" no grid (é vazio)
+CS_C_FUTURE  = CS_BG_PANEL
+# cinza claro  - sem fonte (o 21.mvol parou de registrar; não dá para julgar o radar)
+CS_C_NOSRC   = "#a3abb3"
 # cinza escuro - estação em manutenção (desligada de propósito: não é falha)
-CS_C_MAINT   = "#484f58"
+CS_C_MAINT   = "#40474f"
 
 # códigos de status --------------------------------------------------------------------
 # os códigos são índices (0..4) das listas CLST_STATUS_COLORS e
@@ -96,6 +108,13 @@ CLST_STATUS_LABELS = [ "Atraso grave",              # CI_ST_DL
                        "No prazo",                  # CI_ST_OK
                        "Sem fonte (mvol)",          # CI_ST_NOSRC
                        "Manutenção" ]               # CI_ST_MAINT
+
+# JSON de status -----------------------------------------------------------------------
+
+# versão do formato do JSON gravado pelo rsmStatus.py (sem a chave = 1).
+# 2 (2026.nov): par de cada slot = [atraso_s | null, status] (antes
+# [timestamp, status]), mais schema_version e source_heartbeat
+CI_STATUS_SCHEMA_VERSION = 2
 
 # grade de tempo -----------------------------------------------------------------------
 
@@ -157,9 +176,9 @@ CI_SOURCE_STALE_MINUTES = 30
 
 # painel de métricas (rsm_figure.py) ---------------------------------------------------
 
-# taxa de sucesso (% no prazo) a partir da qual o card fica verde
+# taxa de sucesso (% no prazo) a partir da qual o card fica na cor de "no prazo"
 CF_RATE_GOOD_PCT = 90
-# taxa de sucesso a partir da qual o card fica âmbar (abaixo disso: vermelho)
+# taxa de sucesso a partir da qual o card fica na cor de "atraso leve" (abaixo disso: "perdido")
 CF_RATE_WARN_PCT = 75
 # % de slots perdidos acima do qual a barra da estação ganha um alerta "⚠"
 CF_MISSING_ALERT_PCT = 10

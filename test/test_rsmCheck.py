@@ -6,6 +6,7 @@ Copyright (c) 1995-2026, Instituto de Controle do Espaço Aéreo
 test_rsmCheck
 testes do alarme da recepção radar (rsmCheck.py, formato Nagios)
 
+2026.nov  mlabru  frase da fonte comum com o PNG; caso do heartbeat do mvol
 2026.nov  mlabru  initial version (Linux/Python)
 """
 # < imports >──────────────────────────────────────────────────────────────────────────
@@ -154,7 +155,21 @@ def test_stale_source_is_critical():
     li_code, ls_msg = rck.evaluate(ldct_doc, CDT_NOW_UTC)
 
     assert li_code == rck.CI_EXIT_CRITICAL
-    assert "catalog.db sem observação nova" in ls_msg
+    assert "catalog.db sem observações novas" in ls_msg
+
+
+def test_silent_radars_with_mvol_running_say_so():
+    """
+    com o heartbeat do mvol recente, o alarme diz que as estações pararam (não
+    "mvol parado ou estações")
+    """
+    ldct_doc = _document(fi_source_minutes=cfg.CI_SOURCE_STALE_MINUTES + 60)
+    ldct_doc["source_heartbeat"] = CDT_NOW_UTC.isoformat()
+
+    li_code, ls_msg = rck.evaluate(ldct_doc, CDT_NOW_UTC)
+
+    assert li_code == rck.CI_EXIT_CRITICAL
+    assert "as estações pararam de enviar" in ls_msg
 
 
 def test_empty_dbase_is_critical():
@@ -164,7 +179,7 @@ def test_empty_dbase_is_critical():
     li_code, ls_msg = rck.evaluate(ldct_doc, CDT_NOW_UTC)
 
     assert li_code == rck.CI_EXIT_CRITICAL
-    assert "desde nunca" in ls_msg
+    assert "sem nenhuma observação" in ls_msg
 
 
 def test_critical_message_also_lists_warnings():

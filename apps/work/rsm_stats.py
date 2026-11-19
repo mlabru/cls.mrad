@@ -13,6 +13,8 @@ relatório nunca discordam.  Não importa o matplotlib (nem o numpy): o alarme
 roda mesmo que a pilha gráfica do virtualenv esteja quebrada -- foi assim
 que o PNG congelou em 2026-10.
 
+2026.nov  mlabru  source_problem: a frase da fonte (faixa do PNG e alarme),
+                  exata com o heartbeat do vol_sync.sh (source_heartbeat)
 2026.nov  mlabru  initial version (Linux/Python): saiu do rsm_figure
                   (_count_statuses, _station_order, stations_from_document,
                   a decisão de source_alert) para o alarme e o relatório
@@ -170,5 +172,62 @@ def is_source_stale(fdt_last_update: datetime.datetime | None,
     ldt_stale_limit = fdt_now_utc - datetime.timedelta(minutes=cfg.CI_SOURCE_STALE_MINUTES)
 
     return fdt_last_update < ldt_stale_limit
+
+# ─────────────────────────────────────────────────────────────────────────────────────
+def _when(fdt_instant: datetime.datetime | None) -> str:
+    """
+    formata um instante para as frases de fonte ("nunca" se None).
+
+    :param fdt_instant: instante UTC, ou None
+    :returns: "AAAA-MM-DD HH:MM UTC" ou "nunca"
+    """
+    if fdt_instant is None:
+        return "nunca"
+
+    return f"{fdt_instant:%Y-%m-%d %H:%M} UTC"
+
+# ─────────────────────────────────────────────────────────────────────────────────────
+def source_problem(fdct_document: dict, fdt_now_utc: datetime.datetime) -> str | None:
+    """
+    descreve o problema da fonte de dados, se houver (a faixa do PNG e o alarme).
+
+    sem o heartbeat do vol_sync.sh (source_heartbeat nulo), um banco sem
+    arquivo novo é ambíguo: mvol parado ou todas as estações mudas.  Com ele,
+    o caso é exato:
+
+    - arquivo novo recente                        -> None (tudo em dia)
+    - heartbeat recente, nenhum arquivo novo      -> as estações pararam de enviar
+    - heartbeat velho, nenhum arquivo novo        -> o 21.mvol parou
+    - sem heartbeat, nenhum arquivo novo          -> ambíguo (as duas causas)
+
+    "recente" é o mesmo limite de is_source_stale (cfg.CI_SOURCE_STALE_MINUTES).
+
+    :param fdct_document: conteúdo do JSON de status
+    :param fdt_now_utc: instante atual, UTC, com fuso
+    :returns: a frase (sem "⚠"), ou None se a fonte está em dia ou se o JSON é
+              do formato antigo, sem "source_last_update"
+    """
+    if "source_last_update" not in fdct_document:
+        return None
+
+    ldt_last_update = document_time(fdct_document, "source_last_update")
+    ldt_heartbeat = document_time(fdct_document, "source_heartbeat")
+
+    if not is_source_stale(ldt_last_update, fdt_now_utc):
+        return None
+
+    if ldt_heartbeat is not None and not is_source_stale(ldt_heartbeat, fdt_now_utc):
+        return (f"nenhum arquivo novo no catalog.db desde {_when(ldt_last_update)}, com o "
+                f"21.mvol em dia: as estações pararam de enviar")
+
+    if ldt_heartbeat is not None:
+        return (f"21.mvol parado: último sucesso do vol_sync.sh em {_when(ldt_heartbeat)}; "
+                f"último arquivo novo em {_when(ldt_last_update)}")
+
+    if ldt_last_update is None:
+        return "catalog.db sem nenhuma observação registrada pelo 21.mvol"
+
+    return (f"catalog.db sem observações novas desde {_when(ldt_last_update)} "
+            f"(21.mvol parado ou nenhuma estação enviando)")
 
 # < the end >──────────────────────────────────────────────────────────────────────────

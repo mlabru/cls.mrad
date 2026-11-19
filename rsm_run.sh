@@ -18,7 +18,9 @@
 # lock de instância (flock no fd 200): se o cron disparar de novo antes do
 # fim da rodada anterior, a nova sai sem fazer nada (rc 0).
 #
-# 2026.nov  mlabru  - heartbeat RSM_RUN_OK_FILE (cls_heartbeat) no fim de toda
+# 2026.nov  mlabru  - rsmStatus.py --mvol-heartbeat RSM_MVOL_SYNC_OK_FILE
+#                     (heartbeat do vol_sync.sh: mvol parado x radares mudos)
+#                   - heartbeat RSM_RUN_OK_FILE (cls_heartbeat) no fim de toda
 #                     execução bem sucedida, para o rsm_check.sh
 #
 # 2026.out  mlabru  - python3 do RSM_VENV (rsm_activate_venv), como o
@@ -135,7 +137,8 @@ main()
 
     # classifica os slots a partir do banco (rsmStatus.py -> RSM_STATUS_JSON)
     run_python_step rsmStatus -d "${RSM_DBASE_FILE}" -w "${RSM_WINDOW_HOURS}" \
-                              -s "${RSM_STATUS_JSON}" || exit 1
+                              -s "${RSM_STATUS_JSON}" \
+                              --mvol-heartbeat "${RSM_MVOL_SYNC_OK_FILE}" || exit 1
 
     # desenha o PNG (rsmPNG.py -> RSM_PNG_FILE)
     run_python_step rsmPNG -w "${RSM_WINDOW_HOURS}" -i "${RSM_STATUS_JSON}" \

@@ -6,6 +6,7 @@ Copyright (c) 1995-2026, Instituto de Controle do Espaço Aéreo
 test_rsm_dbase
 testes unitários de rsm_dbase (leitura SOMENTE LEITURA do catalog.db)
 
+2026.nov  mlabru  fetch_observations devolve também o timestamp
 2026.nov  mlabru  fetch_first_file_time (início do histórico)
 2026.nov  mlabru  fetch_observations filtra por timestamp (nome do arquivo)
 2026.out  mlabru  banco como única fonte: fetch_last_update; os testes de
@@ -77,8 +78,10 @@ def test_fetch_observations_filters_by_file_time_window(make_dbase):
     llst = rsm_dbase.fetch_observations(lconn, ldt_start.timestamp(), ldt_end.timestamp())
     lconn.close()
 
-    assert sorted(llst) == [("A/250/STI-250--2026-04-12--12-00-00.mvol", 1.0),
-                            ("A/250/STI-250--2026-04-12--12-30-00.mvol", 2.0)]
+    assert sorted(llst) == [("A/250/STI-250--2026-04-12--12-00-00.mvol", 1.0,
+                             ldt_start.timestamp()),
+                            ("A/250/STI-250--2026-04-12--12-30-00.mvol", 2.0,
+                             ldt_start.timestamp() + 1800)]
 
 
 def test_fetch_observations_sem_tabela(tmp_path):

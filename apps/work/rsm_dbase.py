@@ -13,6 +13,8 @@ não cria o banco, não cria tabela, não grava e não apaga nada.  A
 interpretação de cada linha (sítio, alcance, slot esperado, offset UTC) é
 feita por quem lê (rsmStatus._parse_observation).
 
+2026.nov  mlabru  fetch_observations devolve também o timestamp do mvol, para
+                  o rsmStatus conferir a dupla leitura do nome do arquivo
 2026.nov  mlabru  fetch_first_file_time (início do histórico, para o rsmReport.py)
 2026.nov  mlabru  imports cls_common.* (pacote do repo cls.common, via
                   CLS_PYLIB; antes symlinks de diretório)
@@ -70,7 +72,7 @@ def connect(fs_dbase_path: str) -> sqlite3.Connection:
 
 # ─────────────────────────────────────────────────────────────────────────────────────
 def fetch_observations(fconn: sqlite3.Connection, ff_start_epoch: float,
-                       ff_end_epoch: float) -> list[tuple[str, float]]:
+                       ff_end_epoch: float) -> list[tuple[str, float, float]]:
     """
     lê as observações brutas cujo horário de arquivo está na janela [início, fim).
 
@@ -79,17 +81,20 @@ def fetch_observations(fconn: sqlite3.Connection, ff_start_epoch: float,
     o atraso; o mvol tem índice nela).  Linhas sem timestamp (nome que o mvol
     não conseguiu ler) ficam de fora -- o monrad também não as leria.
 
-    devolve o mtime (epoch da chegada no servidor, como o "find -printf %T@"
-    do vol_sync.sh o listou) e o caminho; a interpretação fica com quem lê
-    (rsmStatus._parse_observation).
+    devolve o caminho, o mtime (epoch da chegada no servidor, como o "find
+    -printf %T@" do vol_sync.sh o listou) e o próprio timestamp; a
+    interpretação fica com quem lê (rsmStatus._parse_observation).  O
+    timestamp volta só para conferência: o monrad lê o horário do nome por
+    conta própria, e um timestamp diferente quer dizer que as duas leituras
+    divergiram.
 
     :param fconn: conexão aberta por connect()
     :param ff_start_epoch: início da janela (epoch UTC, inclusive)
     :param ff_end_epoch: fim da janela (epoch UTC, exclusive)
-    :returns: lista de (fullpath, mtime); lista vazia se a tabela (ou a
+    :returns: lista de (fullpath, mtime, timestamp); lista vazia se a tabela (ou a
               coluna timestamp) ainda não existe -- o 21.mvol as cria
     """
-    ls_query = (f"SELECT fullpath, mtime FROM {ct.CS_TABLE} "
+    ls_query = (f"SELECT fullpath, mtime, timestamp FROM {ct.CS_TABLE} "
                 "WHERE timestamp >= ? AND timestamp < ?")
 
     try:

@@ -8,6 +8,7 @@ testes do rsm_cfg.sh: padrões de produção, override pelo ambiente, trava
 CLS_ENV=test e o setup (rsm_setup do rsm_common.sh: mkdir + cd em
 RSM_PATH, PYTHONPATH em apps/)
 
+2026.nov  mlabru  RSM_MVOL_SYNC_OK_FILE (pelo VOL_PATH) e a trava sobre ele
 2026.out  mlabru  RSM_VENV (padrão ~/.venv); RSM_PATH padrão ~/Public/mrad
 2026.out  mlabru  banco como única fonte: sem RSM_REMOTE_* (nem servidor nem
                   trava -r); RSM_DBASE_FILE padrão = banco do mvol
@@ -45,7 +46,7 @@ def _source(fdct_env: dict, fb_setup: bool = False,
     imprime CT_VARS, com o ambiente limpo de RSM_*/MET_* herdados mais fdct_env
     """
     ldct_env = {ls: lv for ls, lv in os.environ.items()
-                if not ls.startswith(("RSM_", "MET_"))}
+                if not ls.startswith(("RSM_", "MET_", "VOL_"))}
     ldct_env.update(fdct_env)
 
     ls_cmd = f'source "{MPTH_ROOT}/rsm_cfg.sh"; '
@@ -66,7 +67,8 @@ def _tst_env(fpth_root: pathlib.Path, **kwargs) -> dict:
     ldct = {"CLS_ENV": "test",
             "CLS_TST_ROOT": str(fpth_root),
             "RSM_PATH": str(fpth_root / "mrad"),
-            "RSM_DBASE_FILE": str(fpth_root / "mvol" / "data" / "dbase" / "catalog.db")}
+            "RSM_DBASE_FILE": str(fpth_root / "mvol" / "data" / "dbase" / "catalog.db"),
+            "VOL_PATH": str(fpth_root / "mvol")}
     ldct.update(kwargs)
 
     return ldct
@@ -101,6 +103,26 @@ def test_override_pelo_ambiente(tmp_path):
     assert 0 == lproc.returncode, lproc.stderr
     assert [str(tmp_path / "mrad"),
             str(tmp_path / "mvol" / "data" / "dbase" / "catalog.db")] == lproc.stdout.splitlines()
+
+def test_heartbeat_do_mvol_padrao_e_pelo_vol_path(tmp_path):
+    # padrão: o VOL_SYNC_OK_FILE do vol_cfg.sh (VOL_PATH padrão do mvol)
+    lproc = _source({"USER": "fulano"}, fs_body='echo "$RSM_MVOL_SYNC_OK_FILE"')
+    assert "/home/fulano/Public/mvol/data/state/vol_sync.ok" == lproc.stdout.strip()
+
+    # o VOL_PATH do ambiente (cls.env ou cls.test) desloca o heartbeat junto
+    lproc = _source(_tst_env(tmp_path), fs_body='echo "$RSM_MVOL_SYNC_OK_FILE"')
+    assert 0 == lproc.returncode, lproc.stderr
+    assert str(tmp_path / "mvol" / "data" / "state" / "vol_sync.ok") == lproc.stdout.strip()
+
+def test_trava_recusa_heartbeat_do_mvol_fora_da_raiz(tmp_path):
+    ldct = _tst_env(tmp_path)
+    # sem VOL_PATH, o heartbeat padrão (/home/.../mvol) fica fora da raiz de teste
+    del ldct["VOL_PATH"]
+
+    lproc = _source(ldct)
+
+    assert 1 == lproc.returncode
+    assert "fora de" in lproc.stderr
 
 def test_sem_servidor_remoto():
     # o banco é a única fonte: nenhuma variável de servidor/listagem

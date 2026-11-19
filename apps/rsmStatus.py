@@ -13,16 +13,30 @@ servidor de onde eles vêm.  Quem lista o servidor e grava as observações
 
 uso:
     python rsmStatus.py -d catalog.db [-w HORAS] [-s SAIDA.json]
+                        [--mvol-heartbeat vol_sync.ok]
 
-saída:
-    { "generated_at": "<ISO UTC>",          (quando este JSON foi gerado)
+saída (esquema 2, cfg.CI_STATUS_SCHEMA_VERSION):
+    { "schema_version": 2,
+      "generated_at": "<ISO UTC>",          (quando este JSON foi gerado)
       "last_slot": "<ISO UTC>",             (início do slot da última coluna)
-      "source_last_update": "<ISO UTC>" | null,
-      "stations": { "Belem-250": [[timestamp, código_status], ...], ... } }
+      "source_last_update": "<ISO UTC>" | null,   (max(created_at) do banco)
+      "source_heartbeat": "<ISO UTC>" | null,     (último sucesso do vol_sync.sh)
+      "stations": { "Belem-250": [[atraso_s | null, código_status], ...], ... } }
+    o atraso é chegada - horário do nome, em segundos inteiros (negativo =
+    relógio do radar adiantado); null = slot sem arquivo.  O horário de cada
+    coluna sai de last_slot: a coluna i (de n) começa em
+    last_slot - (n - 1 - i) x 10 min.
 
 tudo é UTC, com fuso explícito: o mtime do banco é um epoch (não tem fuso) e
 o horário no nome do arquivo é UTC.  Não depende do fuso da máquina.
 
+2026.nov  mlabru  JSON esquema 2: atraso em segundos no lugar do timestamp
+                  (que mudava de sentido e ninguém usava), schema_version e
+                  source_heartbeat; classify_slot devolve None para slot sem
+                  arquivo (antes MISS, reinterpretado por quem chamava);
+                  aviso de leitura divergente do nome (timestamp do mvol x
+                  parsing do monrad); heartbeat do vol_sync.sh (--mvol-
+                  heartbeat) distingue mvol parado de radares mudos
 2026.nov  mlabru  núcleo classify_period(início, fim, agora), também usado
                   pelo rsmReport.py (disponibilidade de um período); carência
                   de 40 min (cfg.CI_PENDING_GRACE_MINUTES, medida no banco)
@@ -118,6 +132,10 @@ def arg_parse(flst_argv: list | None = None) -> argparse.Namespace:
     l_parser.add_argument("-s", "--out", help="arquivo JSON de saída.",
                                          type=pathlib.Path, default="OUT.json")
 
+    l_parser.add_argument("--mvol-heartbeat", help="heartbeat do vol_sync.sh do 21.mvol "
+                                                   "(VOL_SYNC_OK_FILE; só lido).",
+                                              type=str, default=None)
+
     return l_parser.parse_args(flst_argv)
 
 # ─────────────────────────────────────────────────────────────────────────────────────
@@ -138,7 +156,7 @@ def _delay_limits(fs_station: str) -> tuple[int, int]:
 
 # ─────────────────────────────────────────────────────────────────────────────────────
 def classify_slot(fdct_observations: dict, fs_station: str,
-                  fdt_slot: datetime.datetime) -> tuple[float, int]:
+                  fdt_slot: datetime.datetime) -> tuple[int, int] | None:
     """
     classifica um único slot de uma estação.
 
@@ -146,7 +164,7 @@ def classify_slot(fdct_observations: dict, fs_station: str,
     NÃO o início do slot: um arquivo das 12:08 que chega às 12:10 atrasou
     2 min, não 10).  Os limites dependem do alcance (_delay_limits; 250 km:
     10/20 min, 400 km: 3/10 min, outro: 9/20 min):
-    - arquivo não recebido        -> MISS
+    - arquivo não recebido        -> None (quem chama decide: _unseen_status)
     - até o 1º limite (inclusive) -> OK, inclusive atraso negativo (o relógio
                                      do radar está adiantado em relação ao do
                                      servidor, mas o arquivo chegou)
@@ -156,13 +174,13 @@ def classify_slot(fdct_observations: dict, fs_station: str,
     :param fdct_observations: {(estação, slot): (horário_do_arquivo, horário_chegada)}, UTC
     :param fs_station: estação, no formato "{sítio}-{alcance}"
     :param fdt_slot: horário esperado do slot (UTC com fuso, múltiplo de 10 min)
-    :returns: (timestamp, código_status); o timestamp é o da chegada, ou o do
-              próprio slot se o arquivo não foi recebido
+    :returns: (atraso em segundos inteiros, código_status), ou None se o
+              arquivo do slot não está no banco
     """
     lt_key = (fs_station, fdt_slot)
 
     if lt_key not in fdct_observations:
-        return fdt_slot.timestamp(), cfg.CI_ST_MISS
+        return None
 
     ldt_file_time, ldt_arrival = fdct_observations[lt_key]
     lf_delay_seconds = (ldt_arrival - ldt_file_time).total_seconds()
@@ -175,7 +193,7 @@ def classify_slot(fdct_observations: dict, fs_station: str,
     else:
         li_status = cfg.CI_ST_DL
 
-    return ldt_arrival.timestamp(), li_status
+    return round(lf_delay_seconds), li_status
 
 # ─────────────────────────────────────────────────────────────────────────────────────
 def round_down_to_slot(fdt_time: datetime.datetime) -> datetime.datetime:
@@ -264,7 +282,9 @@ def _load_dbase(fs_dbase_path: str, fdt_start_utc: datetime.datetime,
         l_conn.close()
 
     ldct_observations = {}
-    for ls_filepath, lf_mtime in llst_rows:
+    llst_divergent = []
+
+    for ls_filepath, lf_mtime, lf_name_epoch in llst_rows:
         lt_parsed = _parse_observation(lf_mtime, ls_filepath)
         if lt_parsed is None:
             continue
@@ -272,7 +292,53 @@ def _load_dbase(fs_dbase_path: str, fdt_start_utc: datetime.datetime,
         lt_key, lt_times = lt_parsed
         _keep_earliest_arrival(ldct_observations, lt_key, lt_times)
 
+        if _name_time_diverges(lt_times[0], lf_name_epoch):
+            llst_divergent.append((ls_filepath, lf_name_epoch, lt_times[0]))
+
+    _warn_name_time_divergence(llst_divergent)
+
     return ldct_observations, ldt_last_update
+
+# ─────────────────────────────────────────────────────────────────────────────────────
+def _name_time_diverges(fdt_file_time: datetime.datetime, ff_name_epoch: float | None) -> bool:
+    """
+    diz se o horário do nome lido pelo monrad difere do timestamp do mvol.
+
+    o mvol escolhe a LINHA pela coluna timestamp (a janela da consulta); o
+    monrad escolhe a COLUNA pelo seu próprio parsing (_parse_observation).
+    Se as duas leituras divergirem, um arquivo pode entrar na janela e cair
+    na coluna errada.  Diferença menor que 1 s é arredondamento.
+
+    :param fdt_file_time: horário do arquivo lido pelo monrad (UTC)
+    :param ff_name_epoch: timestamp gravado pelo mvol (epoch UTC), ou None
+    :returns: True se as duas leituras diferem em 1 s ou mais
+    """
+    if ff_name_epoch is None:
+        return False
+
+    return abs(fdt_file_time.timestamp() - float(ff_name_epoch)) >= 1
+
+# ─────────────────────────────────────────────────────────────────────────────────────
+def _warn_name_time_divergence(flst_divergent: list) -> None:
+    """
+    avisa no log, uma vez por rodada, os arquivos com leituras divergentes do nome.
+
+    não muda nada: a coluna continua sendo a da leitura do monrad.  O aviso
+    existe para que uma mudança na regra de um dos lados (mvol ou monrad)
+    apareça, em vez de deslocar arquivos de coluna em silêncio.
+
+    :param flst_divergent: lista de (caminho, timestamp do mvol, horário do monrad)
+    """
+    if not flst_divergent:
+        return
+
+    ls_path, lf_name_epoch, ldt_file_time = flst_divergent[0]
+    ldt_mvol = datetime.datetime.fromtimestamp(float(lf_name_epoch), tz=datetime.timezone.utc)
+
+    M_LOG.warning("%d arquivo(s) com o horário do nome lido diferente pelo mvol (timestamp) "
+                  "e pelo monrad; ex.: %s (mvol=%s, monrad=%s) -- a coluna usa a leitura "
+                  "do monrad", len(flst_divergent), ls_path,
+                  f"{ldt_mvol:%Y-%m-%d %H:%M:%S}", f"{ldt_file_time:%Y-%m-%d %H:%M:%S}")
 
 # ─────────────────────────────────────────────────────────────────────────────────────
 def _keep_earliest_arrival(fdct_observations: dict, ft_key: tuple, ft_times: tuple) -> None:
@@ -442,22 +508,24 @@ def _station_slots(fdct_observations: dict, fs_station: str, flst_slots: list,
     :param fb_source_fresh: fonte em dia (ver _unseen_status)
     :param fb_use_maintenance: False ignora cfg.CLST_STATIONS_MAINTENANCE (a
                                lista vale para AGORA, não para um período passado)
-    :returns: lista de (timestamp, código_status), do slot mais antigo ao mais novo
+    :returns: lista de (atraso em segundos ou None, código_status), do slot
+              mais antigo ao mais novo
     """
     llst_statuses = []
     li_received_count = 0
     lb_maintenance = fb_use_maintenance and fs_station in cfg.CLST_STATIONS_MAINTENANCE
 
     for ldt_slot in flst_slots:
-        lf_timestamp, li_status = classify_slot(fdct_observations, fs_station, ldt_slot)
+        lt_classified = classify_slot(fdct_observations, fs_station, ldt_slot)
 
-        if li_status == cfg.CI_ST_MISS:
+        if lt_classified is None:
             li_status = _unseen_status(ldt_slot, fdt_judged_until, fb_source_fresh,
                                        lb_maintenance)
-        else:
-            li_received_count += 1
+            llst_statuses.append((None, li_status))
+            continue
 
-        llst_statuses.append((lf_timestamp, li_status))
+        li_received_count += 1
+        llst_statuses.append(lt_classified)
 
     M_LOG.info("%d/%d registros válidos encontrados para %s%s.",
                li_received_count, len(llst_statuses), fs_station,
@@ -467,29 +535,69 @@ def _station_slots(fdct_observations: dict, fs_station: str, flst_slots: list,
 
 # ─────────────────────────────────────────────────────────────────────────────────────
 def _source_coverage(fdt_last_update: datetime.datetime | None,
-                     fdt_now_utc: datetime.datetime) -> tuple[datetime.datetime | None, bool]:
+                     fdt_now_utc: datetime.datetime,
+                     fdt_mvol_heartbeat: datetime.datetime | None = None) \
+        -> tuple[datetime.datetime | None, bool]:
     """
     diz até quando o 21.mvol cobriu o tempo e se ele está em dia.
 
-    a cobertura é o max(created_at), limitado a "agora": um relógio do mvol
-    adiantado não pode dar como vencido um slot que ainda não venceu.
+    a cobertura é o mais novo entre o max(created_at) (último arquivo novo
+    registrado) e o heartbeat do vol_sync.sh (última rodada bem sucedida,
+    que lista e registra o servidor inteiro, vazio ou não).  Sem o
+    heartbeat, um banco parado é ambíguo (mvol parado ou radares mudos); com
+    ele, radares mudos com o mvol em dia são julgados (MISS), não "Sem
+    fonte".  A cobertura é limitada a "agora": um relógio do mvol adiantado
+    não pode dar como vencido um slot que ainda não venceu.
 
     :param fdt_last_update: max(created_at) do banco, ou None (sem registro)
     :param fdt_now_utc: instante atual, UTC
-    :returns: (cobertura ou None, True se houve registro nos últimos
+    :param fdt_mvol_heartbeat: último sucesso do vol_sync.sh, ou None
+                               (heartbeat não configurado ou ilegível)
+    :returns: (cobertura ou None, True se a cobertura é dos últimos
               CI_SOURCE_STALE_MINUTES)
     """
-    if fdt_last_update is None:
+    llst_known = [ldt for ldt in (fdt_last_update, fdt_mvol_heartbeat) if ldt is not None]
+
+    if not llst_known:
         return None, False
 
+    ldt_latest = max(llst_known)
     ldt_stale_limit = fdt_now_utc - datetime.timedelta(minutes=cfg.CI_SOURCE_STALE_MINUTES)
 
-    return min(fdt_last_update, fdt_now_utc), fdt_last_update >= ldt_stale_limit
+    return min(ldt_latest, fdt_now_utc), ldt_latest >= ldt_stale_limit
+
+# ─────────────────────────────────────────────────────────────────────────────────────
+def read_mvol_heartbeat(fs_path: str | None) -> datetime.datetime | None:
+    """
+    lê o heartbeat do vol_sync.sh do 21.mvol ("<epoch> <ISO UTC>", cls_heartbeat).
+
+    é o único arquivo do mvol, além do banco, que o monrad lê: um arquivo de
+    estado, não um .mvol (DECISOES, D02/D18).  Ausente ou ilegível vira None,
+    e o monrad volta a julgar a fonte só pelo banco.
+
+    :param fs_path: caminho do heartbeat (VOL_SYNC_OK_FILE), ou None (não configurado)
+    :returns: instante UTC do último sucesso, ou None
+    """
+    if fs_path is None:
+        return None
+
+    try:
+        with open(fs_path, "r", encoding="utf-8") as l_file:
+            ls_epoch = l_file.read().split()[0]
+
+        return datetime.datetime.fromtimestamp(int(ls_epoch), tz=datetime.timezone.utc)
+
+    except (OSError, IndexError, ValueError) as l_err:
+        M_LOG.warning("heartbeat do 21.mvol ilegível (%s): %s -- fonte julgada só pelo "
+                      "catalog.db", fs_path, l_err)
+        return None
 
 # ─────────────────────────────────────────────────────────────────────────────────────
 def classify_period(fs_dbase_path: str, fdt_start_utc: datetime.datetime,
                     fdt_end_utc: datetime.datetime, fdt_now_utc: datetime.datetime,
-                    fb_use_maintenance: bool = True) -> tuple[dict, list, datetime.datetime | None]:
+                    fb_use_maintenance: bool = True,
+                    fdt_mvol_heartbeat: datetime.datetime | None = None) \
+        -> tuple[dict, list, datetime.datetime | None]:
     """
     classifica todos os slots de todas as estações num período [início, fim).
 
@@ -508,7 +616,8 @@ def classify_period(fs_dbase_path: str, fdt_start_utc: datetime.datetime,
     :param fdt_end_utc: fim do período (exclusive), UTC com fuso
     :param fdt_now_utc: instante atual, UTC (decide o que já venceu)
     :param fb_use_maintenance: False ignora cfg.CLST_STATIONS_MAINTENANCE
-    :returns: ({estação: [(timestamp, código_status), ...]}, inícios de slot,
+    :param fdt_mvol_heartbeat: último sucesso do vol_sync.sh, ou None (ver _source_coverage)
+    :returns: ({estação: [(atraso_s ou None, código_status), ...]}, inícios de slot,
                max(created_at) ou None)
     :raises sqlite3.OperationalError: banco inexistente ou ilegível
     """
@@ -521,7 +630,8 @@ def classify_period(fs_dbase_path: str, fdt_start_utc: datetime.datetime,
     _warn_clock_ahead(ldct_observations)
 
     llst_slots = _window_slots(fdt_start_utc, fdt_end_utc)
-    ldt_judged_until, lb_source_fresh = _source_coverage(ldt_last_update, fdt_now_utc)
+    ldt_judged_until, lb_source_fresh = _source_coverage(ldt_last_update, fdt_now_utc,
+                                                         fdt_mvol_heartbeat)
 
     ldct_stations = {}
     for ls_station in _list_stations(ldct_observations):
@@ -533,21 +643,26 @@ def classify_period(fs_dbase_path: str, fdt_start_utc: datetime.datetime,
 
 # ─────────────────────────────────────────────────────────────────────────────────────
 def build_station_status(fs_dbase_path: str,
-                         fi_window_hours: int = cfg.CI_DEFAULT_WINDOW_HOURS) -> dict:
+                         fi_window_hours: int = cfg.CI_DEFAULT_WINDOW_HOURS,
+                         fs_mvol_heartbeat: str | None = None) -> dict:
     """
     monta o status de recepção de todas as estações na janela pedida.
 
     fluxo:
     1. calcula a janela [agora - horas, agora) em UTC;
-    2. classifica a janela (classify_period);
-    3. monta o documento do JSON de status.
+    2. lê o heartbeat do vol_sync.sh, se configurado (read_mvol_heartbeat);
+    3. classifica a janela (classify_period);
+    4. monta o documento do JSON de status (esquema 2).
 
     :param fs_dbase_path: catalog.db do 21.mvol (só lido, nunca alterado)
     :param fi_window_hours: janela, em horas
-    :returns: {"generated_at": ISO UTC,
+    :param fs_mvol_heartbeat: heartbeat do vol_sync.sh (VOL_SYNC_OK_FILE), ou None
+    :returns: {"schema_version": cfg.CI_STATUS_SCHEMA_VERSION,
+               "generated_at": ISO UTC,
                "last_slot": ISO UTC (início do slot da última coluna) ou None,
                "source_last_update": ISO UTC ou None,
-               "stations": {estação: [(timestamp, código_status), ...]}}
+               "source_heartbeat": ISO UTC ou None,
+               "stations": {estação: [(atraso_s ou None, código_status), ...]}}
     :raises sqlite3.OperationalError: banco inexistente ou ilegível
     """
     # um único "agora" para toda a rodada
@@ -557,21 +672,31 @@ def build_station_status(fs_dbase_path: str,
     ldt_end_utc = ldt_now_utc.replace(second=0, microsecond=0)
     ldt_start_utc = ldt_end_utc - datetime.timedelta(hours=fi_window_hours)
 
-    ldct_stations, llst_slots, ldt_last_update = classify_period(fs_dbase_path, ldt_start_utc,
-                                                                 ldt_end_utc, ldt_now_utc)
+    ldt_heartbeat = read_mvol_heartbeat(fs_mvol_heartbeat)
+
+    ldct_stations, llst_slots, ldt_last_update = classify_period(
+                                                     fs_dbase_path, ldt_start_utc, ldt_end_utc,
+                                                     ldt_now_utc,
+                                                     fdt_mvol_heartbeat=ldt_heartbeat)
 
     ls_last_update = None
     if ldt_last_update is not None:
         ls_last_update = ldt_last_update.isoformat()
+
+    ls_heartbeat = None
+    if ldt_heartbeat is not None:
+        ls_heartbeat = ldt_heartbeat.isoformat()
 
     # janela de 0 h não tem slot nenhum
     ls_last_slot = None
     if llst_slots:
         ls_last_slot = llst_slots[-1].isoformat()
 
-    return {"generated_at": ldt_now_utc.isoformat(),
+    return {"schema_version": cfg.CI_STATUS_SCHEMA_VERSION,
+            "generated_at": ldt_now_utc.isoformat(),
             "last_slot": ls_last_slot,
             "source_last_update": ls_last_update,
+            "source_heartbeat": ls_heartbeat,
             "stations": ldct_stations}
 
 # ─────────────────────────────────────────────────────────────────────────────────────
@@ -585,7 +710,7 @@ def main(flst_argv: list | None = None) -> int:
     l_args = arg_parse(flst_argv)
 
     try:
-        ldct_status = build_station_status(l_args.dbase, l_args.hours)
+        ldct_status = build_station_status(l_args.dbase, l_args.hours, l_args.mvol_heartbeat)
 
     except sqlite3.OperationalError as l_err:
         # sem o banco não há fonte nenhuma: melhor falhar do que gravar 100% MISS
